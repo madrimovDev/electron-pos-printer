@@ -73,85 +73,191 @@ function setupPrinterIPC() {
  * Cross-platform raw printing
  * - Linux: lp -d <printer> -o raw <file>
  * - macOS: lp -d <printer> -o raw <file>
- * - Windows: Uses PowerShell or direct port writing
+ * - Windows: PowerShell with .NET RawPrinterHelper
  */
 function printRaw(filePath, printerName, jobId) {
   return new Promise((resolve) => {
     const platform = os.platform();
-    let command;
-    let args;
 
     console.log(`Platform: ${platform}, Printer: ${printerName}`);
 
     if (platform === 'win32') {
-      // Windows: Use PowerShell to send raw data
-      // Option 1: Using .NET RawPrinterHelper (most reliable)
-      const psScript = `
-        $data = [System.IO.File]::ReadAllBytes('${filePath.replace(/\\/g, '\\\\')}')
-        $printer = Get-WmiObject -Query "SELECT * FROM Win32_Printer WHERE Name='${printerName}'"
-        if ($printer) {
-          $port = $printer.PortName
-          [System.IO.File]::WriteAllBytes($port, $data)
-          Write-Output "OK"
-        } else {
-          # Try direct file copy to shared printer
-          Copy-Item -Path '${filePath.replace(/\\/g, '\\\\')}' -Destination "\\\\localhost\\${printerName}" -ErrorAction Stop
-          Write-Output "OK"
-        }
-      `;
-
-      // Simpler approach: Use print command with /rawonly
-      command = 'cmd.exe';
-      args = ['/c', `copy /b "${filePath}" "\\\\%COMPUTERNAME%\\${printerName}"`];
-
-      // Alternative: Use PowerShell with Out-Printer (less reliable for raw)
-      // command = 'powershell.exe';
-      // args = ['-Command', `Get-Content -Path "${filePath}" -Raw | Out-Printer -Name "${printerName}"`];
-
-    } else if (platform === 'darwin') {
-      // macOS: Use lp command (same as Linux, CUPS-based)
-      command = 'lp';
-      args = ['-d', printerName, '-o', 'raw', filePath];
-
+      // Windows: Use PowerShell with .NET to send raw data
+      printRawWindows(filePath, printerName, jobId, resolve);
     } else {
-      // Linux: Use lp command
-      command = 'lp';
-      args = ['-d', printerName, '-o', 'raw', filePath];
+      // Linux/macOS: Use lp command (CUPS)
+      printRawUnix(filePath, printerName, jobId, resolve);
+    }
+  });
+}
+
+/**
+ * Windows raw printing using PowerShell and .NET
+ */
+function printRawWindows(filePath, printerName, jobId, resolve) {
+  // PowerShell script that uses .NET RawPrinterHelper
+  const psScript = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public class RawPrinterHelper
+{
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    public class DOCINFOA
+    {
+        [MarshalAs(UnmanagedType.LPStr)] public string pDocName;
+        [MarshalAs(UnmanagedType.LPStr)] public string pOutputFile;
+        [MarshalAs(UnmanagedType.LPStr)] public string pDataType;
     }
 
-    console.log(`Running: ${command} ${args.join(' ')}`);
+    [DllImport("winspool.Drv", EntryPoint = "OpenPrinterA", CharSet = CharSet.Ansi, SetLastError = true)]
+    public static extern bool OpenPrinter([MarshalAs(UnmanagedType.LPStr)] string szPrinter, out IntPtr hPrinter, IntPtr pd);
 
-    const child = spawn(command, args, { shell: platform === 'win32' });
+    [DllImport("winspool.Drv", EntryPoint = "ClosePrinter", SetLastError = true)]
+    public static extern bool ClosePrinter(IntPtr hPrinter);
 
-    let stdout = '';
-    let stderr = '';
+    [DllImport("winspool.Drv", EntryPoint = "StartDocPrinterA", CharSet = CharSet.Ansi, SetLastError = true)]
+    public static extern bool StartDocPrinter(IntPtr hPrinter, Int32 level, [In, MarshalAs(UnmanagedType.LPStruct)] DOCINFOA di);
 
-    child.stdout?.on('data', (data) => {
-      stdout += data.toString();
-    });
+    [DllImport("winspool.Drv", EntryPoint = "EndDocPrinter", SetLastError = true)]
+    public static extern bool EndDocPrinter(IntPtr hPrinter);
 
-    child.stderr?.on('data', (data) => {
-      stderr += data.toString();
-    });
+    [DllImport("winspool.Drv", EntryPoint = "StartPagePrinter", SetLastError = true)]
+    public static extern bool StartPagePrinter(IntPtr hPrinter);
 
-    child.on('close', (code) => {
-      // Clean up temp file
-      try { fs.unlinkSync(filePath); } catch (e) {}
+    [DllImport("winspool.Drv", EntryPoint = "EndPagePrinter", SetLastError = true)]
+    public static extern bool EndPagePrinter(IntPtr hPrinter);
 
-      if (code === 0) {
-        console.log('Print job submitted:', stdout || 'OK');
-        resolve({ success: true, jobId });
-      } else {
-        console.error('Print error:', stderr || `Exit code: ${code}`);
-        resolve({ success: false, jobId, error: stderr || `Print failed with code ${code}` });
-      }
-    });
+    [DllImport("winspool.Drv", EntryPoint = "WritePrinter", SetLastError = true)]
+    public static extern bool WritePrinter(IntPtr hPrinter, IntPtr pBytes, Int32 dwCount, out Int32 dwWritten);
 
-    child.on('error', (err) => {
-      try { fs.unlinkSync(filePath); } catch (e) {}
-      console.error('Spawn error:', err);
-      resolve({ success: false, jobId, error: err.message });
-    });
+    public static bool SendBytesToPrinter(string szPrinterName, IntPtr pBytes, Int32 dwCount)
+    {
+        IntPtr hPrinter = IntPtr.Zero;
+        DOCINFOA di = new DOCINFOA();
+        di.pDocName = "RAW Document";
+        di.pDataType = "RAW";
+        bool bSuccess = false;
+
+        if (OpenPrinter(szPrinterName.Normalize(), out hPrinter, IntPtr.Zero))
+        {
+            if (StartDocPrinter(hPrinter, 1, di))
+            {
+                if (StartPagePrinter(hPrinter))
+                {
+                    int dwWritten = 0;
+                    bSuccess = WritePrinter(hPrinter, pBytes, dwCount, out dwWritten);
+                    EndPagePrinter(hPrinter);
+                }
+                EndDocPrinter(hPrinter);
+            }
+            ClosePrinter(hPrinter);
+        }
+        return bSuccess;
+    }
+
+    public static bool SendFileToPrinter(string szPrinterName, string szFileName)
+    {
+        byte[] bytes = System.IO.File.ReadAllBytes(szFileName);
+        IntPtr pUnmanagedBytes = Marshal.AllocCoTaskMem(bytes.Length);
+        Marshal.Copy(bytes, 0, pUnmanagedBytes, bytes.Length);
+        bool bSuccess = SendBytesToPrinter(szPrinterName, pUnmanagedBytes, bytes.Length);
+        Marshal.FreeCoTaskMem(pUnmanagedBytes);
+        return bSuccess;
+    }
+}
+"@
+
+try {
+    \$result = [RawPrinterHelper]::SendFileToPrinter("${printerName}", "${filePath.replace(/\\/g, '\\\\')}")
+    if (\$result) {
+        Write-Output "SUCCESS"
+        exit 0
+    } else {
+        Write-Error "Failed to send data to printer"
+        exit 1
+    }
+} catch {
+    Write-Error \$_.Exception.Message
+    exit 1
+}
+`;
+
+  const child = spawn('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy', 'Bypass',
+    '-Command', psScript
+  ], {
+    windowsHide: true
+  });
+
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout?.on('data', (data) => {
+    stdout += data.toString();
+  });
+
+  child.stderr?.on('data', (data) => {
+    stderr += data.toString();
+  });
+
+  child.on('close', (code) => {
+    // Clean up temp file
+    try { fs.unlinkSync(filePath); } catch (e) {}
+
+    if (code === 0 && stdout.includes('SUCCESS')) {
+      console.log('Print job submitted successfully');
+      resolve({ success: true, jobId });
+    } else {
+      console.error('Print error:', stderr || stdout);
+      resolve({ success: false, jobId, error: stderr || stdout || 'Print failed' });
+    }
+  });
+
+  child.on('error', (err) => {
+    try { fs.unlinkSync(filePath); } catch (e) {}
+    console.error('Spawn error:', err);
+    resolve({ success: false, jobId, error: err.message });
+  });
+}
+
+/**
+ * Unix (Linux/macOS) raw printing using lp command
+ */
+function printRawUnix(filePath, printerName, jobId, resolve) {
+  const child = spawn('lp', ['-d', printerName, '-o', 'raw', filePath]);
+
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout?.on('data', (data) => {
+    stdout += data.toString();
+  });
+
+  child.stderr?.on('data', (data) => {
+    stderr += data.toString();
+  });
+
+  child.on('close', (code) => {
+    // Clean up temp file
+    try { fs.unlinkSync(filePath); } catch (e) {}
+
+    if (code === 0) {
+      console.log('Print job submitted:', stdout || 'OK');
+      resolve({ success: true, jobId });
+    } else {
+      console.error('Print error:', stderr || `Exit code: ${code}`);
+      resolve({ success: false, jobId, error: stderr || `Print failed with code ${code}` });
+    }
+  });
+
+  child.on('error', (err) => {
+    try { fs.unlinkSync(filePath); } catch (e) {}
+    console.error('Spawn error:', err);
+    resolve({ success: false, jobId, error: err.message });
   });
 }
 
