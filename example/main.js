@@ -51,8 +51,8 @@ function setupPrinterIPC() {
       // Build ESC/POS commands from contents
       const escposData = buildESCPOS(contents, charsPerLine);
 
-      // Save to temp file
-      const tempFile = `/tmp/receipt-${jobId}.bin`;
+      // Save to temp file (cross-platform)
+      const tempFile = path.join(os.tmpdir(), `receipt-${jobId}.bin`);
       fs.writeFileSync(tempFile, escposData);
 
       console.log('ESC/POS data saved to:', tempFile);
