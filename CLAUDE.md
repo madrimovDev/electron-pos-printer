@@ -20,10 +20,11 @@ npm run typecheck  # TypeScript type checking
 
 ### Directory Structure
 - `src/types/` - TypeScript interfaces and type definitions
-- `src/commands/` - ESC/POS command constants and utilities
-- `src/printer/` - Printer detection and print job management
+- `src/commands/` - ESC/POS command constants and builders
+- `src/printer/` - Printer detection and raw printing (cross-platform)
 - `src/utils/` - Formatting utilities, HTML builder, and ReceiptBuilder class
 - `src/electron/` - Electron IPC integration (main, preload, renderer)
+- `example/` - Working Electron example app for testing
 
 ### Key Components
 
@@ -34,12 +35,18 @@ npm run typecheck  # TypeScript type checking
 - Currency formatting
 - Receipt templates via `fromData()`
 
+**ESC/POS Builder** (`src/commands/escpos-builder.ts`): Converts PrintContent to raw ESC/POS bytes
+
+**Raw Printer** (`src/printer/raw-printer.ts`): Cross-platform raw printing:
+- Linux/macOS: `lp -d <printer> -o raw` (CUPS)
+- Windows: PowerShell with .NET RawPrinterHelper (winspool.drv)
+
 **Electron Integration**:
 - Main process: `setupPrinterIPC()` registers IPC handlers
 - Preload: `exposePosPrinterAPI()` exposes safe API to renderer
 - Renderer: `PosPrinter` class and `createPosPrinter()` factory
 
-**Paper Width Support**:
+### Paper Width Support
 - 58mm: 32 characters per line
 - 80mm: 48 characters per line
 
@@ -52,4 +59,5 @@ npm run typecheck  # TypeScript type checking
 - Uses tsup for bundling (CJS + ESM + DTS)
 - Electron is a peer dependency (>=28.0.0)
 - All printer operations are async
-- HTML-based printing (generates HTML, prints via Electron's print API)
+- Raw ESC/POS printing for thermal printers
+- Cross-platform support (Linux, macOS, Windows)
