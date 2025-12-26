@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>POS Printer Test</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 { color: #333; }
+    .section {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 10px;
+      margin-bottom: 10px;
+    }
+    button:hover { background: #0056b3; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    select, input {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      margin-right: 10px;
+    }
+    #printerList {
+      list-style: none;
+      padding: 0;
+    }
+    #printerList li {
+      padding: 10px;
+      background: #f8f9fa;
+      margin-bottom: 5px;
+      border-radius: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #printerList li.default { background: #d4edda; }
+    #log {
+      background: #1e1e1e;
+      color: #00ff00;
+      padding: 15px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .preview {
+      background: white;
+      border: 2px dashed #ddd;
+      padding: 20px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      max-width: 300px;
+      margin: 20px auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>🖨️ POS Printer Test</h1>
+
+  <div class="section">
+    <h2>Available Printers</h2>
+    <button id="refreshPrinters">Refresh Printers</button>
+    <ul id="printerList">
+      <li>Click "Refresh Printers" to load...</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>Print Settings</h2>
+    <label>
+      Printer:
+      <select id="printerSelect">
+        <option value="">Select a printer...</option>
+      </select>
+    </label>
+    <label>
+      Paper Width:
+      <select id="paperWidth">
+        <option value="80">80mm</option>
+        <option value="58">58mm</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="section">
+    <h2>Test Print</h2>
+    <button id="printTest">Print Test Receipt</button>
+    <button id="printSimple">Print Simple Text</button>
+    <button id="printQR">Print with QR Code</button>
+  </div>
+
+  <div class="section">
+    <h2>Console Log</h2>
+    <div id="log"></div>
+  </div>
+
+  <script>
+    const log = (msg) => {
+      const logEl = document.getElementById('log');
+      const time = new Date().toLocaleTimeString();
+      logEl.innerHTML += `[${time}] ${msg}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(msg);
+    };
+
+    // Check if API is available
+    if (window.posPrinter) {
+      log('✅ POS Printer API is available');
+    } else {
+      log('❌ POS Printer API not found!');
+    }
+
+    // Refresh printers
+    document.getElementById('refreshPrinters').addEventListener('click', async () => {
+      try {
+        log('Fetching printers...');
+        const printers = await window.posPrinter.getPrinters();
+        log(`Found ${printers.length} printer(s)`);
+
+        const list = document.getElementById('printerList');
+        const select = document.getElementById('printerSelect');
+
+        list.innerHTML = '';
+        select.innerHTML = '<option value="">Select a printer...</option>';
+
+        if (printers.length === 0) {
+          list.innerHTML = '<li>No printers found</li>';
+          return;
+        }
+
+        printers.forEach(p => {
+          // List item
+          const li = document.createElement('li');
+          li.className = p.isDefault ? 'default' : '';
+          li.innerHTML = `
+            <span><strong>${p.displayName}</strong> (${p.name})</span>
+            <span>${p.isDefault ? '⭐ Default' : ''}</span>
+          `;
+          list.appendChild(li);
+
+          // Select option
+          const opt = document.createElement('option');
+          opt.value = p.name;
+          opt.textContent = p.displayName + (p.isDefault ? ' (Default)' : '');
+          if (p.isDefault) opt.selected = true;
+          select.appendChild(opt);
+        });
+      } catch (err) {
+        log(`❌ Error: ${err.message}`);
+      }
+    });
+
+    // Print test receipt
+    document.getElementById('printTest').addEventListener('click', async () => {
+      const printerName = document.getElementById('printerSelect').value;
+      const paperWidth = parseInt(document.getElementById('paperWidth').value);
+
+      if (!printerName) {
+        log('⚠️ Please select a printer first');
+        return;
+      }
+
+      log(`Printing test receipt to ${printerName} (${paperWidth}mm)...`);
+
+      try {
+        const contents = [
+          { type: 'text', value: 'TEST DO\'KON', style: { align: 'center', bold: true, size: 'double' } },
+          { type: 'text', value: 'Toshkent sh., Chilonzor t.', style: { align: 'center' } },
+          { type: 'text', value: 'Tel: +998 90 123 45 67', style: { align: 'center' } },
+          { type: 'line' },
+          { type: 'table', rows: [
+            [{ text: 'Mahsulot', bold: true }, { text: 'Soni', align: 'center', bold: true }, { text: 'Narxi', align: 'right', bold: true }]
+          ]},
+          { type: 'line', character: '-' },
+          { type: 'table', rows: [
+            [{ text: 'Coca-Cola 1L' }, { text: '2', align: 'center' }, { text: '12 000', align: 'right' }],
+            [{ text: 'Non' }, { text: '1', align: 'center' }, { text: '5 000', align: 'right' }],
+            [{ text: 'Sut 1L' }, { text: '2', align: 'center' }, { text: '14 000', align: 'right' }]
+          ]},
+          { type: 'line' },
+          { type: 'table', rows: [
+            [{ text: 'JAMI:', bold: true }, { text: '43 000 UZS', align: 'right', bold: true }]
+          ]},
+          { type: 'feed', lines: 1 },
+          { type: 'text', value: 'Xaridingiz uchun rahmat!', style: { align: 'center' } },
+          { type: 'text', value: new Date().toLocaleString(), style: { align: 'center' } },
+          { type: 'feed', lines: 3 },
+          { type: 'cut' }
+        ];
+
+        const result = await window.posPrinter.print(contents, {
+          printerName,
+          paperWidth,
+          silent: true
+        });
+
+        if (result.success) {
+          log(`✅ Print successful! Job ID: ${result.jobId}`);
+        } else {
+          log(`❌ Print failed: ${result.error}`);
+        }
+      } catch (err) {
+        log(`❌ Error: ${err.message}`);
+      }
+    });
+
+    // Print simple text
+    document.getElementById('printSimple').addEventListener('click', async () => {
+      const printerName = document.getElementById('printerSelect').value;
+      const paperWidth = parseInt(document.getElementById('paperWidth').value);
+
+      if (!printerName) {
+        log('⚠️ Please select a printer first');
+        return;
+      }
+
+      log('Printing simple text...');
+
+      try {
+        const result = await window.posPrinter.print([
+          { type: 'text', value: 'Hello, World!', style: { align: 'center', bold: true } },
+          { type: 'text', value: 'This is a test print.', style: { align: 'center' } },
+          { type: 'feed', lines: 3 },
+          { type: 'cut' }
+        ], {
+          printerName,
+          paperWidth,
+          silent: true
+        });
+
+        log(result.success ? '✅ Print successful!' : `❌ Failed: ${result.error}`);
+      } catch (err) {
+        log(`❌ Error: ${err.message}`);
+      }
+    });
+
+    // Print with QR
+    document.getElementById('printQR').addEventListener('click', async () => {
+      const printerName = document.getElementById('printerSelect').value;
+      const paperWidth = parseInt(document.getElementById('paperWidth').value);
+
+      if (!printerName) {
+        log('⚠️ Please select a printer first');
+        return;
+      }
+
+      log('Printing with QR code...');
+
+      try {
+        const result = await window.posPrinter.print([
+          { type: 'text', value: 'Scan QR Code', style: { align: 'center', bold: true } },
+          { type: 'feed', lines: 1 },
+          { type: 'qrcode', value: 'https://github.com', options: { size: 6, align: 'center' } },
+          { type: 'feed', lines: 1 },
+          { type: 'text', value: 'github.com', style: { align: 'center' } },
+          { type: 'feed', lines: 3 },
+          { type: 'cut' }
+        ], {
+          printerName,
+          paperWidth,
+          silent: true
+        });
+
+        log(result.success ? '✅ Print successful!' : `❌ Failed: ${result.error}`);
+      } catch (err) {
+        log(`❌ Error: ${err.message}`);
+      }
+    });
+
+    // Auto-refresh printers on load
+    setTimeout(() => {
+      document.getElementById('refreshPrinters').click();
+    }, 500);
+  </script>
+</body>
+</html>
