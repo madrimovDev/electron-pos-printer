@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & Discussions
+    url: https://github.com/madrimovDev/electron-pos-printer/discussions
+    about: Ask questions and discuss ideas here
+  - name: npm Package
+    url: https://www.npmjs.com/package/@madrimov/electron-pos-printer
+    about: View the package on npm
