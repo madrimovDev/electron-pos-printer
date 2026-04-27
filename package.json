@@ -1,6 +1,6 @@
 {
   "name": "@madrimov/electron-pos-printer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A powerful thermal POS printer library for Electron applications. Supports 58mm and 80mm thermal printers with ESC/POS commands.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
