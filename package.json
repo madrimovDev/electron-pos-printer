@@ -35,11 +35,15 @@
     "80mm",
     "point-of-sale"
   ],
-  "author": "",
+  "author": "madrimov <madrimov5014@gmail.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "https://github.com/madrimovDev/electron-pos-printer.git"
+  },
+  "homepage": "https://github.com/madrimovDev/electron-pos-printer#readme",
+  "bugs": {
+    "url": "https://github.com/madrimovDev/electron-pos-printer/issues"
   },
   "peerDependencies": {
     "electron": ">=28.0.0"
