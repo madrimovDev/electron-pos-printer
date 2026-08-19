@@ -337,12 +337,38 @@ describe('barcode validation', () => {
     expect(() => buildESCPOSData(barcode('EAN13', '12345678901A'))).toThrow(/EAN13/);
   });
 
+  it('accepts a 7-digit EAN8', () => {
+    expect(() => buildESCPOSData(barcode('EAN8', '1234567'))).not.toThrow();
+  });
+
+  it('accepts an 8-digit EAN8', () => {
+    expect(() => buildESCPOSData(barcode('EAN8', '12345678'))).not.toThrow();
+  });
+
   it('rejects an EAN8 of the wrong length', () => {
     expect(() => buildESCPOSData(barcode('EAN8', '12345'))).toThrow(/EAN8/);
   });
 
+  it('accepts an 11-digit UPC-A', () => {
+    expect(() => buildESCPOSData(barcode('UPC-A', '12345678901'))).not.toThrow();
+  });
+
+  it('accepts a 12-digit UPC-A', () => {
+    expect(() => buildESCPOSData(barcode('UPC-A', '123456789012'))).not.toThrow();
+  });
+
   it('rejects a UPC-A of the wrong length', () => {
     expect(() => buildESCPOSData(barcode('UPC-A', '123'))).toThrow(/UPC-A/);
+  });
+
+  it('accepts a 6-digit and an 8-digit UPC-E', () => {
+    expect(() => buildESCPOSData(barcode('UPC-E', '123456'))).not.toThrow();
+    expect(() => buildESCPOSData(barcode('UPC-E', '12345678'))).not.toThrow();
+  });
+
+  it('rejects a non-numeric or wrong-length UPC-E', () => {
+    expect(() => buildESCPOSData(barcode('UPC-E', 'ABCDEF'))).toThrow(/UPC-E/);
+    expect(() => buildESCPOSData(barcode('UPC-E', '123456789'))).toThrow(/UPC-E/);
   });
 
   it('rejects an ITF with an odd digit count', () => {
@@ -355,9 +381,29 @@ describe('barcode validation', () => {
     expect(() => buildESCPOSData(barcode('CODE39', 'ABC-123'))).not.toThrow();
   });
 
+  it('accepts a CODE39 value wrapped in a matched pair of *', () => {
+    expect(() => buildESCPOSData(barcode('CODE39', '*ABC*'))).not.toThrow();
+  });
+
+  it('rejects a CODE39 value with a mid-string *', () => {
+    expect(() => buildESCPOSData(barcode('CODE39', 'AB*CD'))).toThrow(/CODE39/);
+  });
+
+  it('rejects a CODE39 value with an unmatched leading *', () => {
+    expect(() => buildESCPOSData(barcode('CODE39', '*ABC'))).toThrow(/CODE39/);
+  });
+
   it('requires CODABAR to be delimited by A-D', () => {
     expect(() => buildESCPOSData(barcode('CODABAR', '1234'))).toThrow(/CODABAR/);
     expect(() => buildESCPOSData(barcode('CODABAR', 'A1234B'))).not.toThrow();
+  });
+
+  it('accepts printable ASCII in CODE93', () => {
+    expect(() => buildESCPOSData(barcode('CODE93', 'ABC-123'))).not.toThrow();
+  });
+
+  it('rejects non-ASCII in CODE93', () => {
+    expect(() => buildESCPOSData(barcode('CODE93', 'Привет'))).toThrow(/CODE93/);
   });
 
   it('rejects non-ASCII in CODE128', () => {

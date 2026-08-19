@@ -214,9 +214,12 @@ function barcodeError(type: BarcodeType, value: string): string | null {
       if (!DIGITS_ONLY.test(value)) return 'ITF requires digits only';
       return value.length % 2 === 0 ? null : 'ITF requires an even number of digits';
     case 'CODE39':
-      return /^[0-9A-Z \-.$/+%*]+$/.test(value)
+      // '*' is CODE39's start/stop delimiter, not a data character. A value
+      // may omit it (the printer adds it automatically) or wrap itself in a
+      // matched pair, but '*' may not appear anywhere else.
+      return /^(\*[0-9A-Z \-.$/+%]+\*|[0-9A-Z \-.$/+%]+)$/.test(value)
         ? null
-        : 'CODE39 allows only 0-9, A-Z, space and - . $ / + % *';
+        : 'CODE39 allows only 0-9, A-Z, space and - . $ / + %, optionally wrapped in a matched pair of *';
     case 'CODABAR':
       return /^[A-Da-d][0-9\-$:/.+]*[A-Da-d]$/.test(value)
         ? null
