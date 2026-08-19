@@ -21,6 +21,7 @@
 - **Codepage jadvallari qoʻlda yozilmaydi.** Faqat `scripts/generate-codepages.mjs` orqali generatsiya qilinadi.
 - **Codepage roʻyxati (9 ta) va `ESC t` kodlari:** `PC437=0`, `PC850=2`, `PC860=3`, `PC863=4`, `PC865=5`, `WPC1252=16`, `PC866=17`, `PC852=18`, `CP1251=46`. Birinchi sakkiztasi Epson referenceida qatʻiy; `CP1251=46` vendor'ga bogʻliq va foydalanuvchi `codepage: <raqam>` bilan bekor qilishi mumkin.
 - **Default'lar:** `mode = 'raw'`, `codepage = 'PC437'`, `codepageTable = 'PC437'`.
+- **Translit qoidasi va uning yagona istisnosi:** belgi faqat maqsadli codepage'da mavjud boʻlmasa translit qilinadi — **lekin** `U+00A0`, `U+2009`, `U+202F` shartsiz `0x20` ga aylanadi. Sabab: NBSP toʻqqizta codepage'ning hammasida mavjud (`0xFF` / `0xA0`), lekin printerlar bu baytni ishonchsiz chiqaradi. Spec §4.2 ga qarang.
 - **Barcha foydalanuvchiga koʻrinadigan matn (README, CHANGELOG, JSDoc, xato xabarlari) ingliz tilida** — paket xalqaro. Rejaning oʻzi va commit tanasi oʻzbekcha izohlarga ega boʻlishi mumkin, lekin **kod ichidagi izohlar va xato matnlari ingliz tilida**.
 
 ## Tekshirilgan faktlar (implementatsiya vaqtida qayta tekshirish shart emas)
@@ -651,6 +652,17 @@ export const TRANSLIT: Readonly<Record<string, string>> = {
   'ҳ': 'х',
 };
 
+/**
+ * Space variants that are transliterated unconditionally.
+ *
+ * These three are the one exception to "transliterate only what the codepage
+ * cannot encode": NBSP is present in all nine codepages (0xFF in the PC pages,
+ * 0xA0 in CP1251), yet real thermal printers render 0xFF inconsistently — a
+ * space, a filled block, or nothing at all — and NBSP's non-breaking semantics
+ * are meaningless on a fixed-width receipt line. 0x20 is unambiguous everywhere.
+ */
+const ALWAYS_TRANSLIT_SPACES = new Set(['\u00A0', '\u2009', '\u202F']);
+
 const reverseCache = new Map<Codepage, Map<string, number>>();
 
 /** Builds (and caches) the Unicode-to-byte map for a codepage. */
@@ -689,6 +701,10 @@ export function isEncodable(char: string, codepage: Codepage): boolean {
 export function normalizeForCodepage(text: string, codepage: Codepage): string {
   let out = '';
   for (const char of text.normalize('NFC')) {
+    if (ALWAYS_TRANSLIT_SPACES.has(char)) {
+      out += ' ';
+      continue;
+    }
     if (isEncodable(char, codepage)) {
       out += char;
       continue;
