@@ -51,6 +51,10 @@ one place a reader can scan first — and this project adheres to
 
 ## [2.0.0] - 2026-08-19
 
+> Never published to npm on its own. Its changes ship inside 2.1.0, so
+> `npm install @madrimov/electron-pos-printer@2.0.0` will not resolve. The entry
+> is kept because the breaking changes below are what a 1.x caller must act on.
+
 ### Breaking
 
 - `setupPrinterIPC()` now prints raw ESC/POS instead of rendering HTML in a
