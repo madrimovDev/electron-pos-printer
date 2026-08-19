@@ -15,6 +15,7 @@ import type {
   BarcodeType,
   BarcodeOptions,
   QRCodeOptions,
+  QRErrorCorrection,
 } from '../types';
 import { DEFAULTS, PRINTABLE_WIDTH_58, PRINTABLE_WIDTH_80 } from '../types';
 import type { ImageOptions } from '../types';
@@ -306,6 +307,30 @@ export function validateBarcodeValue(type: BarcodeType, value: string): void {
   }
 }
 
+/**
+ * Byte-mode capacity of a version-40 QR symbol, by error-correction level.
+ *
+ * Commands.QRCODE.STORE only rejects payloads above its 65532-byte length
+ * field, which is far beyond what any symbol can hold. The real limit depends
+ * on the error-correction level, and only the builder knows which level was
+ * requested.
+ */
+const QR_CAPACITY: Record<QRErrorCorrection, number> = { L: 2953, M: 2331, Q: 1663, H: 1273 };
+
+/** Throws when a value cannot fit a QR symbol at the given correction level. */
+export function validateQRCodeValue(value: string, errorCorrection: QRErrorCorrection): void {
+  if (value.length === 0) {
+    throw new Error('QR code value is empty');
+  }
+  const bytes = Buffer.byteLength(value, 'utf8');
+  const capacity = QR_CAPACITY[errorCorrection];
+  if (bytes > capacity) {
+    throw new Error(
+      `QR code value is ${bytes} bytes; error correction level ${errorCorrection} holds at most ${capacity}`
+    );
+  }
+}
+
 /** Builds the payload bytes for a barcode, including any code-set prefix. */
 function barcodePayload(type: BarcodeType, value: string): Buffer {
   if (type === 'CODE128') {
@@ -333,11 +358,13 @@ function buildBarcode(value: string, options: BarcodeOptions): Buffer[] {
 }
 
 function buildQRCode(value: string, options?: QRCodeOptions): Buffer[] {
+  const errorCorrection = options?.errorCorrection ?? DEFAULTS.QR_ERROR_CORRECTION;
+  validateQRCodeValue(value, errorCorrection);
   return [
     alignmentCommand(options?.align),
     Commands.QRCODE.MODEL(2),
     Commands.QRCODE.SIZE(options?.size ?? DEFAULTS.QR_SIZE),
-    Commands.QRCODE.ERROR_CORRECTION[options?.errorCorrection ?? DEFAULTS.QR_ERROR_CORRECTION],
+    Commands.QRCODE.ERROR_CORRECTION[errorCorrection],
     // QR symbols carry their own encoding; the printer's character table does
     // not apply to them, so the data goes out as UTF-8.
     Commands.QRCODE.STORE(Buffer.from(value, 'utf8')),

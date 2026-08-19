@@ -510,3 +510,32 @@ describe('barcode validation', () => {
     expect(data[at + 3]).toBe(6);
   });
 });
+
+describe('QR code validation', () => {
+  const qr = (value: string, errorCorrection: 'L' | 'M' | 'Q' | 'H' = 'M'): PrintContent[] => [
+    { type: 'qrcode', value, options: { errorCorrection } },
+  ];
+
+  it('accepts a payload within the level capacity', () => {
+    expect(() => buildESCPOSData(qr('x'.repeat(2331), 'M'))).not.toThrow();
+  });
+
+  it('rejects a payload one byte over the level capacity', () => {
+    expect(() => buildESCPOSData(qr('x'.repeat(2332), 'M'))).toThrow(/2331/);
+  });
+
+  it('applies a different capacity per error-correction level', () => {
+    expect(() => buildESCPOSData(qr('x'.repeat(2900), 'L'))).not.toThrow();
+    expect(() => buildESCPOSData(qr('x'.repeat(2900), 'H'))).toThrow(/1273/);
+  });
+
+  it('counts UTF-8 bytes rather than characters', () => {
+    // Each Cyrillic character is two bytes, so 700 characters is 1400 bytes —
+    // over H's 1273 even though the character count is far below it.
+    expect(() => buildESCPOSData(qr('П'.repeat(700), 'H'))).toThrow(/1273/);
+  });
+
+  it('rejects an empty value', () => {
+    expect(() => buildESCPOSData(qr(''))).toThrow(/empty/);
+  });
+});
