@@ -35,6 +35,9 @@ Bu qiymatlar reja yozilishidan oldin haqiqiy mapping fayllaridan oʻlchangan:
 | `ў` U+045E → CP1251 | `0xA2` — **mavjud** |
 | `Ў` U+040E → PC866 / CP1251 | `0xF6` / `0xA1` — mavjud |
 | `ғ Ғ қ Қ ҳ Ҳ` (U+0492/0493/049A/049B/04B2/04B3) | **hech bir codepage'da yoʻq** — translit shart |
+| `Магазин` → PC866 | `8C A0 A3 A0 A7 A8 AD` |
+| `Итого` → PC866 | `88 E2 AE A3 AE` |
+| `Дўкон` → PC866 | `84 F7 AA AE AD` |
 | Mapping fayl formati | `0xNN\t0xUUUU\t#NAME`, `#` dan keyin izoh |
 | Aniqlanmagan pozitsiyalar | WPC1252 da 5 ta, CP1251 da 1 ta, qolganlarda 0 ta |
 
@@ -1261,7 +1264,7 @@ export const Commands = {
       const expected = widthBytes * height;
       if (data.length !== expected) {
         throw new Error(
-          `Raster data is ${data.length} bytes but ${widthBytes}x${height} needs ${expected}`
+          `Raster data length ${data.length} does not match ${widthBytes}x${height} (needs ${expected})`
         );
       }
       return Buffer.concat([
@@ -2768,8 +2771,8 @@ describe('golden receipt', () => {
 
   it('encodes the Cyrillic header with the verified PC866 bytes', () => {
     const data = buildFixtureReceipt();
-    // Магазин: М=9C А=80 г=A3 а=A0 з=A7 и=A8 н=AD
-    expect(data.indexOf(Buffer.from([0x9c, 0x80, 0xa3, 0xa0, 0xa7, 0xa8, 0xad]))).toBeGreaterThan(0);
+    // Магазин in PC866: М=8C а=A0 г=A3 а=A0 з=A7 и=A8 н=AD (measured, not recalled)
+    expect(data.indexOf(Buffer.from([0x8c, 0xa0, 0xa3, 0xa0, 0xa7, 0xa8, 0xad]))).toBeGreaterThan(0);
   });
 
   it('transliterates the Uzbek turned comma rather than dropping it', () => {
