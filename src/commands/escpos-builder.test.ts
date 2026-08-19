@@ -261,6 +261,17 @@ describe('image content', () => {
     );
   });
 
+  it('rejects a bare filename with an image extension, not the signature error', () => {
+    // '2.0.x' callers most plausibly still have a bare filename in this field.
+    // Without recognizing it as a path, it would fall through to
+    // Buffer.from(source, 'base64') and fail with a decoder-confusion message
+    // instead of the actionable one three lines above.
+    expect(() => buildESCPOSData([{ type: 'image', source: 'logo.png' }])).toThrow(/base64/);
+    expect(() => buildESCPOSData([{ type: 'image', source: 'assets/shop.jpg' }])).toThrow(
+      /base64/
+    );
+  });
+
   it('does not add a line feed of its own after the raster', () => {
     // GS v 0 already advances to the next line; anything more is the caller's
     // to add with feed content, consistent with every other content type.
@@ -274,6 +285,24 @@ describe('image content', () => {
     expect(() =>
       buildESCPOSData([{ type: 'image', source: Buffer.from('nonsense').toString('base64') }])
     ).toThrow(/signature/i);
+  });
+
+  it.each([0, -5, 1.5])('rejects a width of %s', (width) => {
+    expect(() =>
+      buildESCPOSData([{ type: 'image', source: logoPNG(), options: { width } }])
+    ).toThrow(/[Ii]mage width -?\d+(\.\d+)?.*positive integer/);
+  });
+
+  it.each([-10, 999, NaN])('rejects a threshold of %s', (threshold) => {
+    expect(() =>
+      buildESCPOSData([{ type: 'image', source: logoPNG(), options: { threshold } }])
+    ).toThrow(/[Ii]mage threshold.*between 0 and 255/);
+  });
+
+  it('accepts a valid width and threshold', () => {
+    expect(() =>
+      buildESCPOSData([{ type: 'image', source: logoPNG(), options: { width: 4, threshold: 100 } }])
+    ).not.toThrow();
   });
 });
 

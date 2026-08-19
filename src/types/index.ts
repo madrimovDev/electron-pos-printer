@@ -367,6 +367,14 @@ export interface ReceiptData {
   header?: {
     title?: string;
     subtitle?: string;
+    /**
+     * PNG image as base64, or as a `data:image/png;base64,...` URL.
+     *
+     * File paths are not accepted, for the same reason as `ImageContent.source`:
+     * content can arrive from a renderer over IPC, and reading an arbitrary path
+     * on its behalf would hand it a capability it should not have. Read the file
+     * yourself: `readFileSync(path).toString('base64')`.
+     */
     logo?: string;
     address?: string[];
     phone?: string;

@@ -104,9 +104,10 @@ function buildContent(content: PrintContent, context: BuildContext): Buffer[] {
  * Paths a caller is likely to pass by mistake, now that only base64 is accepted.
  *
  * Safe against false positives despite `/` being a base64 character: every PNG
- * begins with the same 8-byte signature, so its base64 always starts `iVBOR`.
+ * begins with the same 8-byte signature, so its base64 always starts `iVBOR`
+ * and never ends in an image extension like `.png`.
  */
-const LOOKS_LIKE_PATH = /^(\.{0,2}\/|[A-Za-z]:[\\/]|\\\\)/;
+const LOOKS_LIKE_PATH = /^(\.{0,2}\/|[A-Za-z]:[\\/]|\\\\)|\.(png|jpe?g|gif|bmp|webp)$/i;
 const PNG_DATA_URL = /^data:image\/png;base64,/i;
 
 /** Turns an image source into PNG bytes. Base64 or a data URL only. */
@@ -121,11 +122,39 @@ function decodeImageSource(source: string): Buffer {
   return Buffer.from(base64, 'base64');
 }
 
+/**
+ * Throws when an image option is present but unusable.
+ *
+ * `width` and `threshold` arrive over IPC as JSON, so TypeScript gives no
+ * protection against a caller passing a computed value that came out wrong.
+ * Left unchecked: `width: 0` emits a raster declaring zero bytes per line,
+ * `width: -5` surfaces as a raw `RangeError` from a typed array constructor
+ * deep in the rasteriser, `width: 1.5` produces a fractional-width raster,
+ * and an out-of-range `threshold` (or `NaN`) silently renders all-white or
+ * all-black. Barcode and QR payloads already get named, actionable errors
+ * for the equivalent mistake; images deserve the same.
+ */
+export function validateImageOptions(options: ImageOptions | undefined): void {
+  if (!options) return;
+  if (options.width !== undefined && (!Number.isInteger(options.width) || options.width <= 0)) {
+    throw new Error(`Invalid image width ${options.width}: must be a positive integer`);
+  }
+  if (
+    options.threshold !== undefined &&
+    (!Number.isInteger(options.threshold) || options.threshold < 0 || options.threshold > 255)
+  ) {
+    throw new Error(
+      `Invalid image threshold ${options.threshold}: must be an integer between 0 and 255`
+    );
+  }
+}
+
 function buildImage(
   source: string,
   options: ImageOptions | undefined,
   context: BuildContext
 ): Buffer[] {
+  validateImageOptions(options);
   const raster = rasterize(decodePNG(decodeImageSource(source)), {
     maxWidth: context.printableWidth,
     width: options?.width,

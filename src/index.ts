@@ -25,7 +25,12 @@ export {
 } from './commands/esc-pos';
 
 // ESC/POS builder
-export { buildESCPOSData, validateBarcodeValue, validateQRCodeValue } from './commands/escpos-builder';
+export {
+  buildESCPOSData,
+  validateBarcodeValue,
+  validateQRCodeValue,
+  validateImageOptions,
+} from './commands/escpos-builder';
 export type { BuildESCPOSOptions } from './commands/escpos-builder';
 
 // Codepage encoding
