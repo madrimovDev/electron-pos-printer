@@ -28,7 +28,7 @@
 
 ## Tekshirilgan faktlar
 
-Bu rejadagi barcha kod reja yozilishidan **oldin** ishlaydigan prototip sifatida yozilib, 22 ta test bilan sinovdan oʻtkazildi. Quyidagilar oʻlchangan, eslab qolingan emas:
+Bu rejadagi barcha kod reja yozilishidan **oldin** ishlaydigan prototip sifatida yozilib, 33 ta tasdiq bilan sinovdan oʻtkazildi (dekoder boʻyicha 22 ta, rasterizatsiya boʻyicha yana 11 ta). Bu son prototip qamrovini bildiradi, quyidagi tasklardagi test sonini emas — Task 1 da 17, Task 2 da 17 test bor. Quyidagilar oʻlchangan, eslab qolingan emas:
 
 | Tekshiruv | Natija |
 |---|---|
