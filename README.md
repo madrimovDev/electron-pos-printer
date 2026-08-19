@@ -199,6 +199,7 @@ input can print differently depending on `codepage`:
 | `“ ” ‘ ’` | `" '` |
 | `– —` | `-` |
 | `…` | `...` |
+| `•` | `*` |
 | `№` | `No` |
 | `₽`, `€` | `RUB`, `EUR` |
 
@@ -247,8 +248,10 @@ to the printer without holding a physical one.
 | Needs a BrowserWindow | no | yes |
 | Barcodes and QR codes | printed by the printer | placeholders only |
 
-`printerName`, `paperWidth` and `charsPerLine` apply to both modes.
-`codepage` and `codepageTable` apply to `raw` only. `silent`, `preview`,
+`printerName` and `paperWidth` apply to both modes. `codepage`,
+`codepageTable` and `charsPerLine` apply to `raw` only and are ignored in
+`html` mode — the HTML renderer derives its column width from `paperWidth`
+alone and has no way to honor a `charsPerLine` override. `silent`, `preview`,
 `margin` and `pageSize` apply to `html` only and are ignored in `raw` mode.
 
 `raw` mode needs no `BrowserWindow` at all — `printRaw(contents, config)` can
@@ -272,8 +275,9 @@ needed to fall back to `html` mode.
 | 80mm | 48 |
 
 The characters-per-line value derived from paper width can be overridden with
-`charsPerLine` — in `PrinterConfig`, or in the options object passed to
-`buildESCPOSData` — for printers that are neither 32 nor 48 columns;
+`charsPerLine` — in `PrinterConfig` (raw mode only — see
+[Print modes](#print-modes)), or in the options object passed to
+`buildESCPOSData` directly — for printers that are neither 32 nor 48 columns;
 42-column printers are a common example.
 
 ## Migrating from 1.x

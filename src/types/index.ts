@@ -74,7 +74,11 @@ export interface PrinterConfig {
   printerName: string;
   /** Paper width in mm (58 or 80). Used in both modes. */
   paperWidth: PaperWidth;
-  /** Characters per line. Defaults from paperWidth. Used in both modes. */
+  /**
+   * Characters per line. Defaults from paperWidth. raw mode only — the html
+   * renderer derives its column width from paperWidth alone and has no way
+   * to honor this override, so it is ignored in html mode.
+   */
   charsPerLine?: number;
 
   /** Which print path to use. Defaults to `'raw'`. */
