@@ -133,6 +133,36 @@ describe('selectCodepage', () => {
   });
 });
 
+describe('receipt typography transliteration', () => {
+  it('encodes guillemet-quoted Cyrillic on PC866', () => {
+    expect(hex(encodeText('«Дўкон»', 'PC866'))).toBe('22 84 F7 AA AE AD 22');
+  });
+
+  it('leaves guillemets untouched on codepages that carry them', () => {
+    expect(normalizeForCodepage('«', 'PC437')).toBe('«');
+    expect(isEncodable('«', 'PC437')).toBe(true);
+    expect(normalizeForCodepage('«', 'CP1251')).toBe('«');
+    expect(isEncodable('«', 'CP1251')).toBe(true);
+  });
+
+  it('leaves the numero sign untouched where it is native, transliterates where absent', () => {
+    expect(normalizeForCodepage('№5', 'PC866')).toBe('№5');
+    expect(normalizeForCodepage('№5', 'PC437')).toBe('No5');
+  });
+
+  it('transliterates the ruble sign on every codepage', () => {
+    for (const cp of CODEPAGES) {
+      expect(normalizeForCodepage('₽', cp)).toBe('RUB');
+    }
+  });
+
+  it('keeps the normalized length equal to the encoded byte count when a substitution expands', () => {
+    const normalized = normalizeForCodepage('₽', 'PC866');
+    expect(normalized).toHaveLength(3);
+    expect(encodeText(normalized, 'PC866')).toHaveLength(3);
+  });
+});
+
 describe('resolveCodepage', () => {
   it('defaults to PC437', () => {
     expect(resolveCodepage()).toEqual({ escT: 0, table: 'PC437' });

@@ -64,6 +64,13 @@ export const TRANSLIT: Readonly<Record<string, string>> = {
   '\u202F': ' ', // narrow no-break space
   // Bullets
   '•': '*',
+  // Receipt typography: guillemets, numero sign, currency symbols absent
+  // from the codepage a real user would select (measured, not guessed)
+  '«': '"',
+  '»': '"',
+  '№': 'No',
+  '₽': 'RUB',
+  '€': 'EUR',
   // Uzbek Cyrillic letters missing from every codepage
   'Ғ': 'Г',
   'ғ': 'г',
