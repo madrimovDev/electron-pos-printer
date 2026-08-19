@@ -132,6 +132,28 @@ export class ReceiptBuilder {
   }
 
   /**
+   * Add a cash drawer pulse.
+   *
+   * Position matters: place it before or after `cut()` depending on whether
+   * the drawer should open while the receipt is still printing.
+   */
+  openCashDrawer(pin: 2 | 5 = 2): this {
+    this.contents.push({ type: 'cashdraw', pin });
+    return this;
+  }
+
+  /**
+   * Add a beeper signal.
+   *
+   * Many printers ignore the beeper command entirely; a silent printer is a
+   * hardware answer rather than a fault in this package.
+   */
+  beep(times: number = 1, duration: number = 3): this {
+    this.contents.push({ type: 'beep', times, duration });
+    return this;
+  }
+
+  /**
    * Add table row
    */
   tableRow(columns: (string | TableColumn)[]): this {
