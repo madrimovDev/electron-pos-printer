@@ -142,10 +142,22 @@ export interface TableColumn {
  * Image print options
  */
 export interface ImageOptions {
-  /** Image width in pixels (will be resized) */
+  /**
+   * Target width in printer dots. Clamped to the printable width and to the
+   * source width — a small logo is never stretched, only shrunk if oversized.
+   */
   width?: number;
-  /** Image alignment */
+  /** Alignment. */
   align?: TextAlign;
+  /**
+   * How to reduce to one bit per pixel. Defaults to `'threshold'`, which keeps
+   * an already-black-and-white logo crisp; `'floyd-steinberg'` preserves the
+   * tone of a photograph or a gradient at the cost of a dot pattern that
+   * thermal dot bloom can smear.
+   */
+  dither?: 'threshold' | 'floyd-steinberg';
+  /** Cutoff for `dither: 'threshold'`, 0-255. Defaults to 128. */
+  threshold?: number;
 }
 
 /**
@@ -189,7 +201,9 @@ export type PrintContentType =
   | 'qrcode'
   | 'image'
   | 'feed'
-  | 'cut';
+  | 'cut'
+  | 'cashdraw'
+  | 'beep';
 
 /**
  * Base print content item
@@ -246,7 +260,15 @@ export interface QRCodeContent extends PrintContentBase {
  */
 export interface ImageContent extends PrintContentBase {
   type: 'image';
-  /** Base64 encoded image data or file path */
+  /**
+   * PNG image as base64, or as a `data:image/png;base64,...` URL.
+   *
+   * File paths are not accepted. Content can arrive from a renderer over IPC,
+   * and reading an arbitrary path on its behalf would hand it a capability it
+   * should not have; the builder stays a pure function that never touches the
+   * filesystem. A main-process caller reads its own file in one line:
+   * `readFileSync(path).toString('base64')`.
+   */
   source: string;
   options?: ImageOptions;
 }
@@ -268,6 +290,33 @@ export interface CutContent extends PrintContentBase {
 }
 
 /**
+ * Cash drawer pulse.
+ *
+ * A content item rather than a method, so the caller controls where in the
+ * sequence it fires — before the cut or after it is a real choice.
+ */
+export interface CashDrawerContent extends PrintContentBase {
+  type: 'cashdraw';
+  /** Connector pin. Defaults to 2, the common wiring. */
+  pin?: 2 | 5;
+}
+
+/**
+ * Beeper.
+ *
+ * Not universally supported: many printers ignore `ESC B` entirely. Nothing in
+ * this package can detect that, so a silent beeper is a hardware answer rather
+ * than a bug.
+ */
+export interface BeepContent extends PrintContentBase {
+  type: 'beep';
+  /** Number of beeps, 1-9. Defaults to 1. */
+  times?: number;
+  /** Duration of each beep, 1-9. Defaults to 3. */
+  duration?: number;
+}
+
+/**
  * Union type for all print content
  */
 export type PrintContent =
@@ -278,7 +327,9 @@ export type PrintContent =
   | QRCodeContent
   | ImageContent
   | FeedContent
-  | CutContent;
+  | CutContent
+  | CashDrawerContent
+  | BeepContent;
 
 /**
  * Print job definition
@@ -376,6 +427,20 @@ export const IPC_CHANNELS = {
   PRINT_RESULT: 'pos-printer:print-result',
   GET_PRINTER_STATUS: 'pos-printer:get-status',
 } as const;
+
+/**
+ * Printable width in printer dots, by paper size.
+ *
+ * This is not the paper's full width: a 58mm roll is 464 dots edge to edge but
+ * only 384 are printable, and 80mm is 640 against 576. `getPageWidthPixels()`
+ * returns the former and must not be used to size an image, or every logo
+ * overruns the printable area.
+ *
+ * Cross-checked three ways: charsPerLine x 12, the 48mm/72mm widths the HTML
+ * renderer uses, and the standard for 203 DPI thermal printers.
+ */
+export const PRINTABLE_WIDTH_58 = 384;
+export const PRINTABLE_WIDTH_80 = 576;
 
 /**
  * Default configuration values
