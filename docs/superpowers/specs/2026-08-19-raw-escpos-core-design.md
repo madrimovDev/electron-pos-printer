@@ -71,12 +71,18 @@ Codepage'da mavjud boʻlmagan belgilar ASCII muqobiliga aylantiriladi:
 | `“ ”` | U+201C, U+201D | `"` |
 | `– —` | U+2013, U+2014 | `-` |
 | `…` | U+2026 | `...` |
-| ajratilmaydigan boʻsh joy | U+00A0 | ` ` |
+| ajratilmaydigan boʻsh joy | U+00A0, U+2009, U+202F | ` ` — **shartsiz**, pastdagi izohga qarang |
 | `ғ қ ҳ` | U+0493, U+049B, U+04B3 | `г к х` |
 
 Translit **maqsadli codepage'ni bilgan holda** ishlaydi va layout'dan **oldin** bajariladi. Har bir belgi uchun avval codepage jadvalida borligi tekshiriladi: mavjud boʻlsa (masalan `«` `»` PC866 da bor) belgi oʻzgartirilmaydi, aks holda translit jadvalidan muqobil olinadi.
 
 Yaʻni funksiya imzosi `translit(text, codepage): string` boʻladi va u encode qadamidagi jadval qidiruvini takrorlaydi, lekin baytga aylantirmaydi. Takrorlanish ataylab: encode faqat layout tugagach ishlashi mumkin, translit esa layout'dan oldin satr uzunligini barqarorlashtirishi kerak. Qidiruv mantiqʻi bitta ichki funksiyada saqlanadi va ikki joydan chaqiriladi.
+
+**Boʻshliq belgilari uchun istisno.** Yuqoridagi «faqat kodlanmaydigan belgi translit qilinadi» qoidasidan bitta ataylab chiqarilgan istisno bor: `U+00A0`, `U+2009`, `U+202F` **har doim** ASCII boʻshligʻiga aylantiriladi, garchi ular toʻqqizta codepage'ning hammasida mavjud boʻlsa ham (PC sahifalarida `0xFF`, CP1251 da `0xA0`).
+
+Sabab: Unicode mapping `0xFF` ni NBSP deb belgilasa ham, haqiqiy termal printerlar bu baytni ishonchsiz chiqaradi — baʻzilari boʻsh joy, baʻzilari toʻldirilgan blok, baʻzilari umuman hech narsa bosadi. Bundan tashqari NBSP'ning «uzilmaydigan» maʻnosi qatʻiy kenglikdagi chek satrida hech qanday roʻl oʻynamaydi. `0x20` esa har bir printerda bir xil va aniq. Belgi soni oʻzgarmaydi, yaʻni ikki fazali quvurning invarianti buzilmaydi.
+
+Bu istisno Task 3 implementatsiyasi paytida aniqlangan: dizaynning umumiy qoidasi bilan uning oʻz test kutilmasi bir-birini rad qilardi, va tanlov shu foydasiga hal qilindi.
 
 ### 4.3 Layout
 
