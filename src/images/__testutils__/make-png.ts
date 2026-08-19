@@ -54,11 +54,13 @@ export interface MakePNGSpec {
    */
   declaredWidth?: number;
   declaredHeight?: number;
+  /** IHDR interlace method. Defaults to 0 (no interlacing). */
+  interlace?: number;
 }
 
 export function makePNG(spec: MakePNGSpec): Buffer {
   const { width, height, rows, bitDepth = 8, colorType = 6, plte, trns, filter = 0 } = spec;
-  const { declaredWidth, declaredHeight } = spec;
+  const { declaredWidth, declaredHeight, interlace = 0 } = spec;
   const stride = rows[0].length;
   const channels = CHANNELS[colorType];
   const bytesPerPixel = Math.max(1, Math.ceil((channels * bitDepth) / 8));
@@ -92,6 +94,7 @@ export function makePNG(spec: MakePNGSpec): Buffer {
   ihdr.writeUInt32BE(declaredHeight ?? height, 4);
   ihdr[8] = bitDepth;
   ihdr[9] = colorType;
+  ihdr[12] = interlace;
 
   const parts = [Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', ihdr)];
   if (plte) parts.push(pngChunk('PLTE', Buffer.from(plte)));

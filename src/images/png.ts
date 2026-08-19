@@ -193,6 +193,11 @@ export function decodePNG(data: Buffer): DecodedImage {
   const pixels = Buffer.alloc(width * height * 4);
   const maxValue = (1 << bitDepth) - 1;
   const palette = plte;
+  const paletteSize = palette ? palette.length / 3 : 0;
+  // A greyscale tRNS carries one 16-bit sample (the "transparent" grey value)
+  // and must be at least 2 bytes; a shorter chunk is malformed. Read it once
+  // rather than per pixel, and treat "no valid tRNS" as "nothing is transparent".
+  const transparentGray = colorType === 0 && trns && trns.length >= 2 ? trns.readUInt16BE(0) : null;
 
   /** Reads sample `index` from a row, honouring sub-byte bit depths. */
   const sampleAt = (row: Buffer, index: number): number => {
@@ -208,6 +213,9 @@ export function decodePNG(data: Buffer): DecodedImage {
       const o = (y * width + x) * 4;
       if (colorType === 3 && palette) {
         const index = sampleAt(row, x);
+        if (index >= paletteSize) {
+          throw new Error(`PNG palette index ${index} is out of range; the table has ${paletteSize} entries`);
+        }
         pixels[o] = palette[index * 3];
         pixels[o + 1] = palette[index * 3 + 1];
         pixels[o + 2] = palette[index * 3 + 2];
@@ -218,7 +226,7 @@ export function decodePNG(data: Buffer): DecodedImage {
         pixels[o] = gray;
         pixels[o + 1] = gray;
         pixels[o + 2] = gray;
-        pixels[o + 3] = trns && trns.readUInt16BE(0) === sample ? 0 : 255;
+        pixels[o + 3] = transparentGray === sample ? 0 : 255;
       } else if (colorType === 4) {
         const gray = row[x * 2];
         pixels[o] = gray;

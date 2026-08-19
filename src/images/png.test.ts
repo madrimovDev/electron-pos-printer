@@ -152,6 +152,34 @@ describe('decodePNG rejections', () => {
     expect(() => decodePNG(png)).toThrow(/zero dimension/);
   });
 
+  it('rejects an interlaced PNG', () => {
+    const png = makePNG({
+      width: 2,
+      height: 1,
+      colorType: 6,
+      rows: [[0, 0, 0, 255, 255, 255, 255, 255]],
+      interlace: 1,
+    });
+    expect(() => decodePNG(png)).toThrow(/nterlac/);
+  });
+
+  it('rejects a truncated chunk', () => {
+    const png = makePNG({ width: 4, height: 2, colorType: 6, rows: transparentRows() });
+    // Cut into the tail of the stream: the last chunk's declared length no
+    // longer fits in what remains of the buffer.
+    const truncated = png.subarray(0, png.length - 16);
+    expect(() => decodePNG(truncated)).toThrow(/Truncated PNG/);
+  });
+
+  it('rejects a PNG with no IHDR chunk', () => {
+    const png = assemblePNG([pngChunk('IDAT', deflateSync(Buffer.alloc(5))), pngChunk('IEND', Buffer.alloc(0))]);
+    expect(() => decodePNG(png)).toThrow(/no IHDR chunk/);
+  });
+
+  it('rejects a PNG with no IDAT chunk', () => {
+    const png = assemblePNG([pngChunk('IHDR', tinyIHDR()), pngChunk('IEND', Buffer.alloc(0))]);
+    expect(() => decodePNG(png)).toThrow(/no IDAT chunk/);
+  });
 });
 
 describe('decodePNG zlib bomb protection', () => {
@@ -175,5 +203,34 @@ describe('decodePNG zlib bomb protection', () => {
     const idat = deflateSync(Buffer.alloc(5));
     const png = assemblePNG([pngChunk('IHDR', ihdr), pngChunk('IDAT', idat), pngChunk('IEND', Buffer.alloc(0))]);
     expect(() => decodePNG(png)).toThrow(/PNG pixel data is 5 bytes; 18 expected/);
+  });
+});
+
+describe('decodePNG malformed pixel data', () => {
+  it('does not crash on a truncated greyscale tRNS', () => {
+    // A well-formed greyscale tRNS is 2 bytes; this one is 1, which used to
+    // throw a raw RangeError from readUInt16BE.
+    const png = makePNG({
+      width: 2,
+      height: 1,
+      colorType: 0,
+      rows: [[0, 255]],
+      trns: [0],
+    });
+    const image = decodePNG(png);
+    // No valid tRNS, so nothing is transparent.
+    expect(image.pixels[3]).toBe(255);
+    expect(image.pixels[7]).toBe(255);
+  });
+
+  it('rejects a palette index beyond the PLTE table', () => {
+    const png = makePNG({
+      width: 2,
+      height: 1,
+      colorType: 3,
+      rows: [[0, 5]],
+      plte: [255, 0, 0], // one entry: index 0 only
+    });
+    expect(() => decodePNG(png)).toThrow(/palette index 5 is out of range.*1 entr/i);
   });
 });

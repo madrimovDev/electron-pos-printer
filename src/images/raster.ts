@@ -141,7 +141,12 @@ export function rasterize(image: DecodedImage, options: RasterizeOptions): Raste
   return pack(ditherToBits(gray, width, height, dither, threshold), width, height);
 }
 
-/** Splits a raster into bands of at most BAND_HEIGHT rows. */
+/**
+ * Splits a raster into bands of at most BAND_HEIGHT rows.
+ *
+ * Each band's `data` is a `subarray` view aliasing the parent raster's
+ * buffer, not a copy — mutating one in place would mutate the source.
+ */
 export function toBands(raster: RasterImage): RasterImage[] {
   const rowBytes = Math.ceil(raster.width / 8);
   const bands: RasterImage[] = [];
