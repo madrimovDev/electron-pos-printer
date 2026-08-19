@@ -359,7 +359,7 @@ The characters-per-line value derived from paper width can be overridden with
 | IPC printed HTML | IPC prints raw; pass `mode: 'html'` for the old path |
 | `cut(true)` cut fully | `cut(true)` cuts partially, as documented |
 | Barcode values were sent unchecked | Invalid values now throw before anything is sent — see `validateBarcodeValue` |
-| `[IMAGE]` placeholder text printed on receipts | Image content prints nothing until raster image support lands |
+| `[IMAGE]` placeholder text printed on receipts | Image content prints as a real raster — see [Images and logos](#images-and-logos) |
 | `printReceipt()` / `printText()` printed via HTML | They now print raw with `PC437` unless a `codepage` is passed |
 
 See [CHANGELOG.md](./CHANGELOG.md) for the full list.
