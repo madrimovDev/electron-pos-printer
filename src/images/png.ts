@@ -98,10 +98,31 @@ function readChunks(data: Buffer): Chunks {
   return { ihdr, plte, trns, idat };
 }
 
+/**
+ * Inflates the IDAT stream, capped at the size the declared dimensions imply.
+ *
+ * Without a ceiling, `inflateSync` will happily allocate up to Node's default
+ * `buffer.kMaxLength` regardless of what IHDR declared — a tiny declared
+ * image with a maliciously large IDAT stalls the (synchronous, main-process)
+ * call and can OOM the process before the dimension check ever gets a say.
+ */
+function inflate(idat: Buffer, maxOutputLength: number): Buffer {
+  try {
+    return inflateSync(idat, { maxOutputLength });
+  } catch (error) {
+    if (error instanceof Error && /Cannot create a Buffer larger than/.test(error.message)) {
+      throw new Error(
+        `PNG pixel data exceeds ${maxOutputLength} bytes, more than its declared dimensions allow`
+      );
+    }
+    throw error;
+  }
+}
+
 /** Reverses the per-scanline filters, returning the raw sample bytes. */
 function unfilter(inflated: Buffer, height: number, stride: number, bytesPerPixel: number): Buffer {
   const expected = (stride + 1) * height;
-  if (inflated.length < expected) {
+  if (inflated.length !== expected) {
     throw new Error(`PNG pixel data is ${inflated.length} bytes; ${expected} expected`);
   }
   const raw = Buffer.alloc(stride * height);
@@ -164,7 +185,10 @@ export function decodePNG(data: Buffer): DecodedImage {
 
   const stride = Math.ceil((width * channels * bitDepth) / 8);
   const bytesPerPixel = Math.max(1, Math.ceil((channels * bitDepth) / 8));
-  const raw = unfilter(inflateSync(Buffer.concat(idat)), height, stride, bytesPerPixel);
+  // The filter byte that prefixes every scanline is not part of a pixel, so
+  // the ceiling is one byte per row larger than the sample data itself.
+  const expectedInflated = (stride + 1) * height;
+  const raw = unfilter(inflate(Buffer.concat(idat), expectedInflated), height, stride, bytesPerPixel);
 
   const pixels = Buffer.alloc(width * height * 4);
   const maxValue = (1 << bitDepth) - 1;

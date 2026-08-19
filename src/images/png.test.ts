@@ -1,6 +1,24 @@
 import { describe, it, expect } from 'vitest';
+import { deflateSync } from 'node:zlib';
 import { decodePNG } from './png';
-import { makePNG } from './__testutils__/make-png';
+import { makePNG, pngChunk } from './__testutils__/make-png';
+
+const SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+/** Hand-assembles a minimal, CRC-valid PNG from a list of chunk buffers. */
+function assemblePNG(chunks: Buffer[]): Buffer {
+  return Buffer.concat([SIGNATURE, ...chunks]);
+}
+
+/** A CRC-valid IHDR declaring a 1x1 8-bit RGBA image. */
+function tinyIHDR(): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(1, 0);
+  ihdr.writeUInt32BE(1, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // colour type: RGBA
+  return ihdr;
+}
 
 /** 4x2 RGBA where the left half is fully transparent black. */
 const transparentRows = (): number[][] => {
@@ -132,5 +150,30 @@ describe('decodePNG rejections', () => {
       declaredWidth: 0,
     });
     expect(() => decodePNG(png)).toThrow(/zero dimension/);
+  });
+
+});
+
+describe('decodePNG zlib bomb protection', () => {
+  it('rejects an IDAT that inflates far beyond its declared dimensions', () => {
+    // IHDR declares 1x1 RGBA (expected inflated size: 5 bytes), but the IDAT
+    // deflates a 10 MB buffer of zeros — the shape of a decompression bomb
+    // that passes every size check on the declared dimensions alone.
+    const idat = deflateSync(Buffer.alloc(10_000_000));
+    const png = assemblePNG([pngChunk('IHDR', tinyIHDR()), pngChunk('IDAT', idat), pngChunk('IEND', Buffer.alloc(0))]);
+    expect(() => decodePNG(png)).toThrow(/pixel data exceeds 5 bytes/);
+  });
+
+  it('still reports the existing shortfall error when pixel data inflates short', () => {
+    // 2x2 RGBA expects (2 * 4 + 1) * 2 = 18 inflated bytes; this IDAT only
+    // inflates to 5.
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(2, 0);
+    ihdr.writeUInt32BE(2, 4);
+    ihdr[8] = 8;
+    ihdr[9] = 6;
+    const idat = deflateSync(Buffer.alloc(5));
+    const png = assemblePNG([pngChunk('IHDR', ihdr), pngChunk('IDAT', idat), pngChunk('IEND', Buffer.alloc(0))]);
+    expect(() => decodePNG(png)).toThrow(/PNG pixel data is 5 bytes; 18 expected/);
   });
 });
