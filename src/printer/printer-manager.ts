@@ -16,29 +16,14 @@ function convertPrinterInfo(printer: ElectronPrinterInfo): PrinterInfo {
 }
 
 /**
- * Get the list of available printers
- * Must be called from the main process
- */
-export function getPrinters(webContents: WebContents): PrinterInfo[] {
-  // For sync fallback - deprecated in newer Electron versions
-  const getPrintersSync = (webContents as unknown as { getPrinters?: () => ElectronPrinterInfo[] }).getPrinters;
-  if (typeof getPrintersSync === 'function') {
-    return getPrintersSync.call(webContents).map(convertPrinterInfo);
-  }
-  return [];
-}
-
-/**
- * Get printers asynchronously (Electron 20+)
+ * Returns the printers Electron can see.
+ *
+ * The synchronous `webContents.getPrinters()` counterpart was removed in
+ * Electron 21; this package requires >= 28, so there is nothing to fall back to.
  */
 export async function getPrintersAsync(webContents: WebContents): Promise<PrinterInfo[]> {
-  if (typeof webContents.getPrintersAsync === 'function') {
-    const printers = await webContents.getPrintersAsync();
-    return printers.map(convertPrinterInfo);
-  }
-
-  // Fallback for older versions
-  return getPrinters(webContents);
+  const printers = await webContents.getPrintersAsync();
+  return printers.map(convertPrinterInfo);
 }
 
 /**

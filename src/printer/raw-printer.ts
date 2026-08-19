@@ -1,57 +1,28 @@
 /**
  * Cross-platform raw ESC/POS printing
  */
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { spawn } from 'child_process';
+import { promises as fsp } from 'node:fs';
+import { platform, tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
 import type { PrintResult } from '../types';
 
-/**
- * Send raw data to printer using platform-specific commands
- * - Linux: lp -d <printer> -o raw <file>
- * - macOS: lp -d <printer> -o raw <file>
- * - Windows: PowerShell with .NET RawPrinterHelper
- */
-export async function printRawData(
-  data: Buffer,
-  printerName: string
-): Promise<PrintResult> {
-  const jobId = `print-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-  const tempFile = path.join(os.tmpdir(), `receipt-${jobId}.bin`);
-
-  // Write data to temp file
-  fs.writeFileSync(tempFile, data);
-
-  try {
-    const platform = os.platform();
-
-    if (platform === 'win32') {
-      return await printRawWindows(tempFile, printerName, jobId);
-    } else {
-      return await printRawUnix(tempFile, printerName, jobId);
-    }
-  } finally {
-    // Clean up temp file
-    try {
-      fs.unlinkSync(tempFile);
-    } catch {
-      // Ignore cleanup errors
-    }
-  }
-}
+/** Environment variable carrying the target printer name into the PowerShell script. */
+export const WINDOWS_ENV_PRINTER = 'POS_PRINTER_NAME';
+/** Environment variable carrying the spool file path into the PowerShell script. */
+export const WINDOWS_ENV_FILE = 'POS_PRINTER_FILE';
 
 /**
- * Windows raw printing using PowerShell and .NET RawPrinterHelper
+ * Raw-print helper for Windows.
+ *
+ * The script is a constant: the printer name and file path arrive through the
+ * environment rather than being interpolated into the source. Interpolation
+ * broke on any name containing a quote and was injection-shaped, and passing
+ * the values as argv instead would still expose Node's Windows argument-quoting
+ * edge cases (trailing backslashes, embedded quotes) — exactly the inputs being
+ * guarded. The environment has no quoting surface at all.
  */
-function printRawWindows(
-  filePath: string,
-  printerName: string,
-  jobId: string
-): Promise<PrintResult> {
-  return new Promise((resolve) => {
-    // PowerShell script that uses .NET RawPrinterHelper
-    const psScript = `
+export const WINDOWS_RAW_PRINT_SCRIPT = `
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -124,39 +95,83 @@ public class RawPrinterHelper
 }
 "@
 
+$printerName = $env:${WINDOWS_ENV_PRINTER}
+$filePath = $env:${WINDOWS_ENV_FILE}
+
+if ([string]::IsNullOrEmpty($printerName)) {
+    Write-Error "${WINDOWS_ENV_PRINTER} is not set"
+    exit 1
+}
+if ([string]::IsNullOrEmpty($filePath)) {
+    Write-Error "${WINDOWS_ENV_FILE} is not set"
+    exit 1
+}
+
 try {
-    $result = [RawPrinterHelper]::SendFileToPrinter("${printerName}", "${filePath.replace(/\\/g, '\\\\')}")
-    if ($result) {
+    if ([RawPrinterHelper]::SendFileToPrinter($printerName, $filePath)) {
         Write-Output "SUCCESS"
         exit 0
-    } else {
-        Write-Error "Failed to send data to printer"
-        exit 1
     }
+    Write-Error "Failed to send data to printer"
+    exit 1
 } catch {
     Write-Error $_.Exception.Message
     exit 1
 }
 `;
 
-    const child = spawn('powershell.exe', [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-Command',
-      psScript,
-    ], {
-      windowsHide: true,
+/**
+ * Send raw data to printer using platform-specific commands
+ * - Linux: lp -d <printer> -o raw <file>
+ * - macOS: lp -d <printer> -o raw <file>
+ * - Windows: PowerShell with .NET RawPrinterHelper
+ */
+export async function printRawData(data: Buffer, printerName: string): Promise<PrintResult> {
+  const jobId = `print-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const tempFile = join(tmpdir(), `receipt-${jobId}.bin`);
+
+  // Written asynchronously: writeFileSync blocks Electron's main process, and a
+  // large receipt with a logo is not a trivial write.
+  await fsp.writeFile(tempFile, data);
+
+  try {
+    return platform() === 'win32'
+      ? await printRawWindows(tempFile, printerName, jobId)
+      : await printRawUnix(tempFile, printerName, jobId);
+  } finally {
+    await fsp.unlink(tempFile).catch(() => {
+      // The spool job already read the file; a failed cleanup is not an error.
     });
+  }
+}
+
+/**
+ * Windows raw printing using PowerShell and .NET RawPrinterHelper
+ */
+function printRawWindows(
+  filePath: string,
+  printerName: string,
+  jobId: string
+): Promise<PrintResult> {
+  return new Promise((resolve) => {
+    const child = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', WINDOWS_RAW_PRINT_SCRIPT],
+      {
+        windowsHide: true,
+        env: {
+          ...process.env,
+          [WINDOWS_ENV_PRINTER]: printerName,
+          [WINDOWS_ENV_FILE]: filePath,
+        },
+      }
+    );
 
     let stdout = '';
     let stderr = '';
-
     child.stdout?.on('data', (chunk) => {
       stdout += chunk.toString();
     });
-
     child.stderr?.on('data', (chunk) => {
       stderr += chunk.toString();
     });
@@ -165,20 +180,12 @@ try {
       if (code === 0 && stdout.includes('SUCCESS')) {
         resolve({ success: true, jobId });
       } else {
-        resolve({
-          success: false,
-          jobId,
-          error: stderr || stdout || 'Print failed',
-        });
+        resolve({ success: false, jobId, error: stderr || stdout || 'Print failed' });
       }
     });
 
     child.on('error', (err) => {
-      resolve({
-        success: false,
-        jobId,
-        error: err.message,
-      });
+      resolve({ success: false, jobId, error: err.message });
     });
   });
 }
@@ -231,7 +238,7 @@ function printRawUnix(
  * Check if raw printing is supported on current platform
  */
 export function isRawPrintingSupported(): boolean {
-  return ['linux', 'darwin', 'win32'].includes(os.platform());
+  return ['linux', 'darwin', 'win32'].includes(platform());
 }
 
 /**
@@ -242,9 +249,9 @@ export function getPlatformPrintInfo(): {
   method: string;
   requirements: string[];
 } {
-  const platform = os.platform();
+  const currentPlatform = platform();
 
-  switch (platform) {
+  switch (currentPlatform) {
     case 'linux':
       return {
         platform: 'Linux',
@@ -265,7 +272,7 @@ export function getPlatformPrintInfo(): {
       };
     default:
       return {
-        platform,
+        platform: currentPlatform,
         method: 'Unknown',
         requirements: ['Platform not supported'],
       };

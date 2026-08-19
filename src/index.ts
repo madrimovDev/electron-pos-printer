@@ -13,7 +13,6 @@ export { buildESCPOSData } from './commands/escpos-builder';
 
 // Printer utilities
 export {
-  getPrinters,
   getPrintersAsync,
   findPrinter,
   getDefaultPrinter,
