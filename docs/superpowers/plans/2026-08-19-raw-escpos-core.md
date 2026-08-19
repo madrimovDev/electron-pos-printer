@@ -843,7 +843,10 @@ export interface PrinterConfig {
   printerName: string;
   /** Paper width in mm (58 or 80). Used in both modes. */
   paperWidth: PaperWidth;
-  /** Characters per line. Defaults from paperWidth. Used in both modes. */
+  /**
+   * Characters per line. Defaults from paperWidth. **raw mode only** — the html
+   * renderer derives its line width from paperWidth alone and ignores this.
+   */
   charsPerLine?: number;
 
   /** Which print path to use. Defaults to `'raw'`. */
@@ -4067,9 +4070,10 @@ console.log(dumpESCPOS(buildESCPOSData(contents, { codepage: 'PC866' }), { table
 | Needs a BrowserWindow | no | yes |
 | Barcodes and QR codes | printed by the printer | placeholders only |
 
-`printerName`, `paperWidth` and `charsPerLine` apply to both modes.
-`codepage` and `codepageTable` apply to `raw` only. `silent`, `preview`,
-`margin` and `pageSize` apply to `html` only and are ignored in `raw` mode.
+`printerName` and `paperWidth` apply to both modes. `codepage`, `codepageTable`
+and `charsPerLine` apply to `raw` only — `buildHTML()` derives its line width
+from `paperWidth` alone, so `charsPerLine` is ignored in `html` mode. `silent`,
+`preview`, `margin` and `pageSize` apply to `html` only and are ignored in `raw`.
 ```
 
 5. Yangi **Migrating from 1.x** boʻlimini qoʻshing:
