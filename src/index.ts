@@ -25,7 +25,7 @@ export {
 } from './commands/esc-pos';
 
 // ESC/POS builder
-export { buildESCPOSData, validateBarcodeValue } from './commands/escpos-builder';
+export { buildESCPOSData, validateBarcodeValue, validateQRCodeValue } from './commands/escpos-builder';
 export type { BuildESCPOSOptions } from './commands/escpos-builder';
 
 // Codepage encoding
@@ -74,6 +74,12 @@ export {
   truncate,
   formatDate,
 } from './utils/format';
+
+// Image decoding and rasterisation
+export { decodePNG, MAX_IMAGE_DIMENSION } from './images/png';
+export type { DecodedImage } from './images/png';
+export { rasterize, toBands, BAND_HEIGHT } from './images/raster';
+export type { RasterImage, RasterizeOptions } from './images/raster';
 
 // HTML builder
 export { buildHTML } from './utils/html-builder';

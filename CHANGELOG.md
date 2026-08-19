@@ -6,6 +6,49 @@ a `Breaking` section on major releases that collects incompatible changes in
 one place a reader can scan first — and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-08-19
+
+### Added
+
+- PNG image printing. Colour types 0, 2, 3, 4 and 6; bit depths 1, 2, 4 and 8
+  for greyscale and palette; all five scanline filters; `PLTE` and `tRNS`.
+  Decoded with Node's own zlib — the package still has no runtime dependency.
+- `ImageOptions.dither` (`'threshold'` by default, or `'floyd-steinberg'`) and
+  `ImageOptions.threshold`.
+- `cashdraw` and `beep` content types, and `ReceiptBuilder.openCashDrawer()`
+  and `.beep()`. Both are content items, so the caller controls where in the
+  sequence they fire.
+- `decodePNG()`, `rasterize()` and `toBands()` are exported for callers who
+  want the raster without the receipt.
+- `PRINTABLE_WIDTH_58` and `PRINTABLE_WIDTH_80`.
+- `validateQRCodeValue()` rejects a payload larger than the symbol can hold at
+  the requested error-correction level.
+
+### Changed
+
+- **Image content now throws on a malformed image instead of skipping it.**
+  2.0.0 skipped every image silently, because at that point none could be
+  printed and throwing would have broken any receipt built from data with a
+  logo. Now only a malformed image fails, so failing loudly is the right
+  behaviour and matches barcode validation. A valid image simply prints.
+- `ImageContent.source` accepts base64 or a `data:image/png;base64,...` URL
+  only. It previously documented file paths, which never worked; accepting one
+  would let a renderer have the main process read an arbitrary file on its
+  behalf. Read it yourself: `readFileSync(path).toString('base64')`.
+
+### Fixed
+
+- `buildContent` now fails to compile if a `PrintContent` variant has no case,
+  rather than silently printing nothing for it.
+
+### Notes
+
+- Images are emitted as 128-row bands wrapped in zero line spacing, because
+  cheap printers drop a tall single raster silently.
+- Input images are capped at 4096x4096: decoding is synchronous and runs on
+  Electron's main process.
+- Many printers ignore the beeper command entirely.
+
 ## [2.0.0] - 2026-08-19
 
 ### Breaking
