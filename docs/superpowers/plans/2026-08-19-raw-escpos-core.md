@@ -2605,6 +2605,31 @@ describe('barcode validation', () => {
     expect(() => buildESCPOSData(barcode('CODE39', 'ABC-123'))).not.toThrow();
   });
 
+  it('accepts CODE39 wrapped in a matched pair of delimiters but not a stray one', () => {
+    expect(() => buildESCPOSData(barcode('CODE39', '*ABC*'))).not.toThrow();
+    expect(() => buildESCPOSData(barcode('CODE39', 'AB*CD'))).toThrow(/CODE39/);
+    expect(() => buildESCPOSData(barcode('CODE39', '*ABC'))).toThrow(/CODE39/);
+  });
+
+  it('accepts valid EAN8 and UPC-A values', () => {
+    expect(() => buildESCPOSData(barcode('EAN8', '1234567'))).not.toThrow();
+    expect(() => buildESCPOSData(barcode('EAN8', '12345670'))).not.toThrow();
+    expect(() => buildESCPOSData(barcode('UPC-A', '12345678901'))).not.toThrow();
+    expect(() => buildESCPOSData(barcode('UPC-A', '123456789012'))).not.toThrow();
+  });
+
+  it('validates UPC-E in both directions', () => {
+    expect(() => buildESCPOSData(barcode('UPC-E', '123456'))).not.toThrow();
+    expect(() => buildESCPOSData(barcode('UPC-E', '12345678'))).not.toThrow();
+    expect(() => buildESCPOSData(barcode('UPC-E', '12345A'))).toThrow(/UPC-E/);
+    expect(() => buildESCPOSData(barcode('UPC-E', '123456789'))).toThrow(/UPC-E/);
+  });
+
+  it('validates CODE93 in both directions', () => {
+    expect(() => buildESCPOSData(barcode('CODE93', 'ABC-123'))).not.toThrow();
+    expect(() => buildESCPOSData(barcode('CODE93', 'Привет'))).toThrow(/CODE93/);
+  });
+
   it('requires CODABAR to be delimited by A-D', () => {
     expect(() => buildESCPOSData(barcode('CODABAR', '1234'))).toThrow(/CODABAR/);
     expect(() => buildESCPOSData(barcode('CODABAR', 'A1234B'))).not.toThrow();
@@ -2679,9 +2704,12 @@ function barcodeError(type: BarcodeType, value: string): string | null {
       if (!DIGITS_ONLY.test(value)) return 'ITF requires digits only';
       return value.length % 2 === 0 ? null : 'ITF requires an even number of digits';
     case 'CODE39':
-      return /^[0-9A-Z \-.$/+%*]+$/.test(value)
+      // '*' is Code 39's start/stop delimiter, not a data character. Epson's
+      // firmware adds the pair itself when it is absent, so a wrapped value is
+      // equally valid — but a '*' anywhere else produces an unscannable barcode.
+      return /^(\*[0-9A-Z \-.$/+%]+\*|[0-9A-Z \-.$/+%]+)$/.test(value)
         ? null
-        : 'CODE39 allows only 0-9, A-Z, space and - . $ / + % *';
+        : 'CODE39 allows only 0-9, A-Z, space and - . $ / + %, optionally wrapped in a matched pair of *';
     case 'CODABAR':
       return /^[A-Da-d][0-9\-$:/.+]*[A-Da-d]$/.test(value)
         ? null
