@@ -38,10 +38,22 @@ function codepageFor(escT: number): Codepage | undefined {
   return (Object.keys(CODEPAGE_ESC_T) as Codepage[]).find((name) => CODEPAGE_ESC_T[name] === escT);
 }
 
-function sizeNote(n: number): string {
-  const width = ((n >> 4) & 0x07) + 1;
-  const height = (n & 0x07) + 1;
-  return `${width}x width, ${height}x height`;
+/**
+ * Decodes the `ESC !` "select print mode(s)" bitmask.
+ *
+ * This is a flag byte, not a magnification nibble pair (that layout belongs
+ * to `GS !`, a command this library never emits) — so the only accurate
+ * rendering is naming which flags are set, not a derived width/height
+ * multiplier.
+ */
+function printModeNote(n: number): string {
+  const flags: string[] = [];
+  if (n & 0x01) flags.push('font B');
+  if (n & 0x08) flags.push('emphasized');
+  if (n & 0x10) flags.push('double-height');
+  if (n & 0x20) flags.push('double-width');
+  if (n & 0x80) flags.push('underline');
+  return `Print mode: ${flags.length > 0 ? flags.join(', ') : 'normal'}`;
 }
 
 /** Decodes the command starting at `offset`, or null if it is not recognised. */
@@ -84,7 +96,7 @@ function decodeCommand(data: Buffer, offset: number): Decoded | null {
             note: at(2) === 0 ? 'Underline off' : `Underline on (${at(2)}-dot)`,
           };
         case 0x21:
-          return { length: 3, mnemonic: `ESC ! ${at(2)}`, note: `Character size: ${sizeNote(at(2))}` };
+          return { length: 3, mnemonic: `ESC ! ${at(2)}`, note: printModeNote(at(2)) };
         case 0x64:
           return { length: 3, mnemonic: `ESC d ${at(2)}`, note: `Feed ${at(2)} line(s)` };
         case 0x70:

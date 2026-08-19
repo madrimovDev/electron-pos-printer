@@ -104,4 +104,62 @@ describe('dumpESCPOS', () => {
       .map((l) => Number.parseInt(l.slice(0, 4), 16));
     expect(offsets).toEqual([0, 2, 5, 7]);
   });
+
+  it('does not throw or loop on a buffer ending mid-command (bare trailing ESC)', () => {
+    const data = Buffer.from([0x1b]);
+    expect(() => dumpESCPOS(data)).not.toThrow();
+    expect(dumpESCPOS(data).split('\n')).toHaveLength(1);
+  });
+
+  it('does not throw or loop when a GS k payload length runs past the end of the buffer', () => {
+    // GS k 0x49 0x02 -- declares a 2-byte payload but the buffer stops right
+    // after the header, before any payload bytes are present.
+    const full = Commands.BARCODE.PRINT(0x49, Buffer.from('AB', 'ascii'));
+    const truncated = full.subarray(0, 4);
+    expect(() => dumpESCPOS(truncated)).not.toThrow();
+    expect(dumpESCPOS(truncated).split('\n')).toHaveLength(1);
+  });
+
+  it('advances past a GS ( k command whose declared params length is 0', () => {
+    // GS ( k pL=0 pH=0 -- an empty-params QR sub-command, followed by plain text.
+    // An advance of 0 anywhere here would be an infinite loop.
+    const data = Buffer.concat([Buffer.from([0x1d, 0x28, 0x6b, 0x00, 0x00]), Buffer.from('AB', 'ascii')]);
+    const dump = dumpESCPOS(data);
+    const lines = dump.split('\n');
+    expect(lines).toHaveLength(2);
+    const offsets = lines.map((l) => Number.parseInt(l.slice(0, 4), 16));
+    expect(offsets).toEqual([0, 5]);
+  });
+
+  it('degrades an unmapped GS second byte to a single unknown-byte line and resumes scanning', () => {
+    // 0x1D 0x0A is not a recognised GS sub-command; the GS byte alone must
+    // become one unknown-byte line, and the following LF and text must decode
+    // independently rather than being swallowed as part of a bogus command.
+    const data = Buffer.concat([Buffer.from([0x1d, 0x0a]), Buffer.from('AB', 'ascii')]);
+    const dump = dumpESCPOS(data);
+    const lines = dump.split('\n');
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain('1D');
+    expect(lines[0]).toContain('unknown');
+    expect(lines[1]).toContain('LF');
+    expect(lines[2]).toContain('"AB"');
+    const offsets = lines.map((l) => Number.parseInt(l.slice(0, 4), 16));
+    expect(offsets).toEqual([0, 1, 2]);
+  });
+
+  it('annotates ESC ! print-mode flags rather than a magnification', () => {
+    const doubleHeight = dumpESCPOS(Commands.TEXT.DOUBLE_HEIGHT);
+    expect(doubleHeight).toContain('double-height');
+    expect(doubleHeight).not.toContain('width');
+
+    const doubleWidth = dumpESCPOS(Commands.TEXT.DOUBLE_WIDTH);
+    expect(doubleWidth).toContain('double-width');
+    expect(doubleWidth).not.toContain('height');
+
+    const doubleSize = dumpESCPOS(Commands.TEXT.DOUBLE_SIZE);
+    expect(doubleSize).toContain('double-height');
+    expect(doubleSize).toContain('double-width');
+
+    expect(dumpESCPOS(Commands.TEXT.NORMAL)).toContain('normal');
+  });
 });
