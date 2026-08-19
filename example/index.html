@@ -108,6 +108,11 @@
       <option value="PC852">PC852 — Latin 2</option>
       <option value="WPC1252">WPC1252 — Windows Western</option>
     </select>
+    <label for="dither">Dithering</label>
+    <select id="dither">
+      <option value="threshold" selected>threshold — crisp logos</option>
+      <option value="floyd-steinberg">floyd-steinberg — photos and gradients</option>
+    </select>
   </div>
 
   <div class="section">
@@ -133,6 +138,23 @@
       logEl.scrollTop = logEl.scrollHeight;
       console.log(msg);
     };
+
+    /** Draws a simple shop mark and returns it as base64 PNG. */
+    function makeLogo() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 240;
+      canvas.height = 80;
+      const ctx = canvas.getContext('2d');
+      // Transparent background on purpose: this is the case that would print as a
+      // filled black rectangle if the library dropped the alpha channel.
+      ctx.clearRect(0, 0, 240, 80);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 30, 240, 8);
+      ctx.font = 'bold 34px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('DOʻKON', 120, 72);
+      return canvas.toDataURL('image/png').split(',')[1];
+    }
 
     // Builds the print config shared by every print/dump call from the current form state.
     function config() {
@@ -309,6 +331,7 @@
     // code, and a partial cut.
     function sampleContents() {
       return [
+        { type: 'image', source: makeLogo(), options: { align: 'center', dither: document.getElementById('dither').value } },
         { type: 'text', value: 'Магазин «Дўкон»', style: { align: 'center', bold: true, size: 'double' } },
         { type: 'text', value: 'Toshkent shahri, Chilonzor', style: { align: 'center' } },
         { type: 'line', character: '-' },
@@ -323,6 +346,8 @@
         { type: 'qrcode', value: 'https://madrimov.uz', options: { size: 6, align: 'center' } },
         { type: 'feed', lines: 2 },
         { type: 'cut', partial: true },
+        { type: 'cashdraw' },
+        { type: 'beep' },
       ];
     }
 
