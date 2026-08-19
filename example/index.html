@@ -327,9 +327,16 @@
     }
 
     document.getElementById('sample').addEventListener('click', async () => {
+      const cfg = config();
+
+      if (!cfg.printerName) {
+        log('⚠️ Please select a printer first');
+        return;
+      }
+
       log('Printing sample receipt (Cyrillic + Uzbek)...');
       try {
-        const result = await window.posPrinter.print(sampleContents(), config());
+        const result = await window.posPrinter.print(sampleContents(), cfg);
         log(result.success ? '✅ Print successful!' : `❌ Failed: ${result.error}`);
       } catch (err) {
         log(`❌ Error: ${err.message}`);
