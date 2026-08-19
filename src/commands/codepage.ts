@@ -34,7 +34,9 @@ export const CODEPAGES = Object.keys(CODEPAGE_TABLES) as readonly Codepage[];
  *
  * A substitution is only consulted when the character itself is not encodable,
  * and the result is checked against the codepage in turn, so `ғ` becomes `г`
- * on PC866 but `?` on PC437.
+ * on PC866 but `?` on PC437. Exception: the space variants listed in
+ * `ALWAYS_TRANSLIT_SPACES` below always use their entry here, even when the
+ * character itself is encodable.
  */
 export const TRANSLIT: Readonly<Record<string, string>> = {
   // Apostrophes and turned commas (Uzbek Latin, typographic quotes)
@@ -123,7 +125,7 @@ export function normalizeForCodepage(text: string, codepage: Codepage): string {
   let out = '';
   for (const char of text.normalize('NFC')) {
     if (ALWAYS_TRANSLIT_SPACES.has(char)) {
-      out += ' ';
+      out += TRANSLIT[char];
       continue;
     }
     if (isEncodable(char, codepage)) {
