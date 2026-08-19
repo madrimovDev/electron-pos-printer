@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildESCPOSData } from './escpos-builder';
 import type { PrintContent, PaperWidth, BarcodeType } from '../types';
+import { makePNG } from '../images/__testutils__/make-png';
 
 /**
  * Wrapper around buildESCPOSData so the signature change in the next task
@@ -201,25 +202,136 @@ describe('barcode content', () => {
   });
 });
 
+/** A 4x2 PNG whose left half is transparent and right half is solid black. */
+function logoPNG(): string {
+  const rows: number[][] = [];
+  for (let y = 0; y < 2; y++) {
+    const row: number[] = [];
+    for (let x = 0; x < 4; x++) row.push(0, 0, 0, x < 2 ? 0 : 255);
+    rows.push(row);
+  }
+  return makePNG({ width: 4, height: 2, colorType: 6, rows }).toString('base64');
+}
+
 describe('image content', () => {
-  it('emits nothing until real image support lands in milestone 2', () => {
-    const withImage = buildESCPOSData([{ type: 'image', source: 'logo.png' }]);
-    const withoutImage = buildESCPOSData([]);
-    expect([...withImage]).toEqual([...withoutImage]);
+  it('emits a raster command', () => {
+    const data = buildESCPOSData([{ type: 'image', source: logoPNG() }]);
+    // GS v 0 0
+    expect(seqAt(data, 0x1d, 0x76, 0x30, 0x00)).toBeGreaterThan(0);
   });
 
-  it('never prints a placeholder on the receipt', () => {
-    const data = buildESCPOSData([{ type: 'image', source: 'logo.png' }]);
-    expect(data.toString('ascii')).not.toContain('IMAGE');
+  it('wraps the raster in zero line spacing and restores the default', () => {
+    const data = buildESCPOSData([{ type: 'image', source: logoPNG() }]);
+    expectOrder(data, [
+      [0x1b, 0x33, 0x00], // ESC 3 0
+      [0x1d, 0x76, 0x30, 0x00], // GS v 0 0
+      [0x1b, 0x32], // ESC 2
+    ]);
   });
 
-  it('does not break a receipt built from data with a logo', () => {
+  it('composites transparency over white rather than printing a black block', () => {
+    const data = buildESCPOSData([{ type: 'image', source: logoPNG() }]);
+    const at = data.indexOf(Buffer.from([0x1d, 0x76, 0x30, 0x00]));
+    // header is 8 bytes: GS v 0 m xL xH yL yH, then one byte per row
+    expect(data[at + 8]).toBe(0x30);
+  });
+
+  it('accepts a data URL as well as bare base64', () => {
+    const bare = buildESCPOSData([{ type: 'image', source: logoPNG() }]);
+    const url = buildESCPOSData([
+      { type: 'image', source: `data:image/png;base64,${logoPNG()}` },
+    ]);
+    expect([...url]).toEqual([...bare]);
+  });
+
+  it('honours the alignment option', () => {
+    const data = buildESCPOSData([
+      { type: 'image', source: logoPNG(), options: { align: 'center' } },
+    ]);
+    expectOrder(data, [[0x1b, 0x61, 0x01], [0x1d, 0x76, 0x30, 0x00]]);
+  });
+
+  it('rejects a file path with a message naming the real requirement', () => {
+    expect(() => buildESCPOSData([{ type: 'image', source: '/home/user/logo.png' }])).toThrow(
+      /base64/
+    );
+    expect(() => buildESCPOSData([{ type: 'image', source: './logo.png' }])).toThrow(/base64/);
+    expect(() => buildESCPOSData([{ type: 'image', source: 'C:\\logos\\shop.png' }])).toThrow(
+      /base64/
+    );
+  });
+
+  it('rejects a bare filename with an image extension, not the signature error', () => {
+    // '2.0.x' callers most plausibly still have a bare filename in this field.
+    // Without recognizing it as a path, it would fall through to
+    // Buffer.from(source, 'base64') and fail with a decoder-confusion message
+    // instead of the actionable one three lines above.
+    expect(() => buildESCPOSData([{ type: 'image', source: 'logo.png' }])).toThrow(/base64/);
+    expect(() => buildESCPOSData([{ type: 'image', source: 'assets/shop.jpg' }])).toThrow(
+      /base64/
+    );
+  });
+
+  it('does not add a line feed of its own after the raster', () => {
+    // GS v 0 already advances to the next line; anything more is the caller's
+    // to add with feed content, consistent with every other content type.
+    const data = buildESCPOSData([{ type: 'image', source: logoPNG() }]);
+    const restore = data.indexOf(Buffer.from([0x1b, 0x32])); // ESC 2
+    // What follows the spacing restore is the alignment reset and nothing else.
+    expect([...data.subarray(restore + 2)]).toEqual([0x1b, 0x61, 0x00]);
+  });
+
+  it('surfaces a decode failure rather than skipping the image', () => {
     expect(() =>
-      buildESCPOSData([
-        { type: 'image', source: 'logo.png' },
-        { type: 'text', value: 'Shop' },
-      ])
+      buildESCPOSData([{ type: 'image', source: Buffer.from('nonsense').toString('base64') }])
+    ).toThrow(/signature/i);
+  });
+
+  it.each([0, -5, 1.5])('rejects a width of %s', (width) => {
+    expect(() =>
+      buildESCPOSData([{ type: 'image', source: logoPNG(), options: { width } }])
+    ).toThrow(/[Ii]mage width -?\d+(\.\d+)?.*positive integer/);
+  });
+
+  it.each([-10, 999, NaN])('rejects a threshold of %s', (threshold) => {
+    expect(() =>
+      buildESCPOSData([{ type: 'image', source: logoPNG(), options: { threshold } }])
+    ).toThrow(/[Ii]mage threshold.*between 0 and 255/);
+  });
+
+  it('accepts a valid width and threshold', () => {
+    expect(() =>
+      buildESCPOSData([{ type: 'image', source: logoPNG(), options: { width: 4, threshold: 100 } }])
     ).not.toThrow();
+  });
+});
+
+describe('cash drawer content', () => {
+  it('pulses pin 2 by default', () => {
+    const data = buildESCPOSData([{ type: 'cashdraw' }]);
+    expect(seqAt(data, 0x1b, 0x70, 0x00, 0x19, 0xfa)).toBeGreaterThan(0);
+  });
+
+  it('pulses pin 5 when asked', () => {
+    const data = buildESCPOSData([{ type: 'cashdraw', pin: 5 }]);
+    expect(seqAt(data, 0x1b, 0x70, 0x01, 0x19, 0xfa)).toBeGreaterThan(0);
+  });
+});
+
+describe('beep content', () => {
+  it('beeps once by default', () => {
+    const data = buildESCPOSData([{ type: 'beep' }]);
+    expect(seqAt(data, 0x1b, 0x42, 0x01, 0x03)).toBeGreaterThan(0);
+  });
+
+  it('honours times and duration', () => {
+    const data = buildESCPOSData([{ type: 'beep', times: 3, duration: 5 }]);
+    expect(seqAt(data, 0x1b, 0x42, 0x03, 0x05)).toBeGreaterThan(0);
+  });
+
+  it('clamps out-of-range values', () => {
+    const data = buildESCPOSData([{ type: 'beep', times: 99, duration: 0 }]);
+    expect(seqAt(data, 0x1b, 0x42, 0x09, 0x01)).toBeGreaterThan(0);
   });
 });
 
@@ -425,5 +537,34 @@ describe('barcode validation', () => {
     const at = data.indexOf(Buffer.from([0x1d, 0x6b, 0x49]));
     // payload is '{B' + 'a{{b' = 6 bytes
     expect(data[at + 3]).toBe(6);
+  });
+});
+
+describe('QR code validation', () => {
+  const qr = (value: string, errorCorrection: 'L' | 'M' | 'Q' | 'H' = 'M'): PrintContent[] => [
+    { type: 'qrcode', value, options: { errorCorrection } },
+  ];
+
+  it('accepts a payload within the level capacity', () => {
+    expect(() => buildESCPOSData(qr('x'.repeat(2331), 'M'))).not.toThrow();
+  });
+
+  it('rejects a payload one byte over the level capacity', () => {
+    expect(() => buildESCPOSData(qr('x'.repeat(2332), 'M'))).toThrow(/2331/);
+  });
+
+  it('applies a different capacity per error-correction level', () => {
+    expect(() => buildESCPOSData(qr('x'.repeat(2900), 'L'))).not.toThrow();
+    expect(() => buildESCPOSData(qr('x'.repeat(2900), 'H'))).toThrow(/1273/);
+  });
+
+  it('counts UTF-8 bytes rather than characters', () => {
+    // Each Cyrillic character is two bytes, so 700 characters is 1400 bytes —
+    // over H's 1273 even though the character count is far below it.
+    expect(() => buildESCPOSData(qr('П'.repeat(700), 'H'))).toThrow(/1273/);
+  });
+
+  it('rejects an empty value', () => {
+    expect(() => buildESCPOSData(qr(''))).toThrow(/empty/);
   });
 });

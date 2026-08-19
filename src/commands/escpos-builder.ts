@@ -15,12 +15,16 @@ import type {
   BarcodeType,
   BarcodeOptions,
   QRCodeOptions,
+  QRErrorCorrection,
 } from '../types';
-import { DEFAULTS } from '../types';
+import { DEFAULTS, PRINTABLE_WIDTH_58, PRINTABLE_WIDTH_80 } from '../types';
+import type { ImageOptions } from '../types';
 import { calculateColumnWidths } from '../utils/format';
 import { Commands } from './esc-pos';
 import { encodeText, normalizeForCodepage, selectCodepage, resolveCodepage } from './codepage';
 import type { Codepage } from './codepage';
+import { decodePNG } from '../images/png';
+import { rasterize, toBands } from '../images/raster';
 
 export interface BuildESCPOSOptions {
   /** Paper width in mm. Determines charsPerLine unless that is given. */
@@ -40,6 +44,8 @@ export interface BuildESCPOSOptions {
 interface BuildContext {
   charsPerLine: number;
   table: Codepage;
+  /** Printable width in dots, for image content. */
+  printableWidth: number;
 }
 
 /** Builds the complete ESC/POS byte stream for a receipt. */
@@ -52,7 +58,8 @@ export function buildESCPOSData(
     options.charsPerLine ??
     (paperWidth === 58 ? DEFAULTS.CHARS_PER_LINE_58 : DEFAULTS.CHARS_PER_LINE_80);
   const { escT, table } = resolveCodepage(options.codepage, options.codepageTable);
-  const context: BuildContext = { charsPerLine, table };
+  const printableWidth = paperWidth === 58 ? PRINTABLE_WIDTH_58 : PRINTABLE_WIDTH_80;
+  const context: BuildContext = { charsPerLine, table, printableWidth };
 
   const buffers: Buffer[] = [Commands.INIT, selectCodepage(escT)];
   for (const content of contents) {
@@ -81,14 +88,99 @@ function buildContent(content: PrintContent, context: BuildContext): Buffer[] {
     case 'qrcode':
       return buildQRCode(content.value, content.options);
     case 'image':
-      // Raster image support arrives in milestone 2. Emitting a '[IMAGE]'
-      // placeholder would print that literal text on a customer's receipt, and
-      // throwing would break every receipt built from data with a logo, so the
-      // content is skipped.
-      return [];
+      return buildImage(content.source, content.options, context);
+    case 'cashdraw':
+      return [
+        content.pin === 5 ? Commands.CASH_DRAWER.OPEN_PIN5 : Commands.CASH_DRAWER.OPEN_PIN2,
+      ];
+    case 'beep':
+      return [Commands.BEEP(content.times ?? 1, content.duration ?? 3)];
     default:
-      return [];
+      return assertNever(content);
   }
+}
+
+/**
+ * Paths a caller is likely to pass by mistake, now that only base64 is accepted.
+ *
+ * Safe against false positives despite `/` being a base64 character: every PNG
+ * begins with the same 8-byte signature, so its base64 always starts `iVBOR`
+ * and never ends in an image extension like `.png`.
+ */
+const LOOKS_LIKE_PATH = /^(\.{0,2}\/|[A-Za-z]:[\\/]|\\\\)|\.(png|jpe?g|gif|bmp|webp)$/i;
+/** Matches a `data:image/png;base64,...` URL. Shared with the html builder. */
+export const PNG_DATA_URL = /^data:image\/png;base64,/i;
+
+/** Turns an image source into PNG bytes. Base64 or a data URL only. */
+function decodeImageSource(source: string): Buffer {
+  if (LOOKS_LIKE_PATH.test(source)) {
+    throw new Error(
+      'Image source must be base64 or a data:image/png;base64 URL — file paths are not accepted. ' +
+        'Read the file yourself: readFileSync(path).toString("base64")'
+    );
+  }
+  const base64 = PNG_DATA_URL.test(source) ? source.slice(source.indexOf(',') + 1) : source;
+  return Buffer.from(base64, 'base64');
+}
+
+/**
+ * Throws when an image option is present but unusable.
+ *
+ * `width` and `threshold` arrive over IPC as JSON, so TypeScript gives no
+ * protection against a caller passing a computed value that came out wrong.
+ * Left unchecked: `width: 0` emits a raster declaring zero bytes per line,
+ * `width: -5` surfaces as a raw `RangeError` from a typed array constructor
+ * deep in the rasteriser, `width: 1.5` produces a fractional-width raster,
+ * and an out-of-range `threshold` (or `NaN`) silently renders all-white or
+ * all-black. Barcode and QR payloads already get named, actionable errors
+ * for the equivalent mistake; images deserve the same.
+ */
+export function validateImageOptions(options: ImageOptions | undefined): void {
+  if (!options) return;
+  if (options.width !== undefined && (!Number.isInteger(options.width) || options.width <= 0)) {
+    throw new Error(`Invalid image width ${options.width}: must be a positive integer`);
+  }
+  if (
+    options.threshold !== undefined &&
+    (!Number.isInteger(options.threshold) || options.threshold < 0 || options.threshold > 255)
+  ) {
+    throw new Error(
+      `Invalid image threshold ${options.threshold}: must be an integer between 0 and 255`
+    );
+  }
+}
+
+function buildImage(
+  source: string,
+  options: ImageOptions | undefined,
+  context: BuildContext
+): Buffer[] {
+  validateImageOptions(options);
+  const raster = rasterize(decodePNG(decodeImageSource(source)), {
+    maxWidth: context.printableWidth,
+    width: options?.width,
+    dither: options?.dither,
+    threshold: options?.threshold,
+  });
+
+  const buffers: Buffer[] = [alignmentCommand(options?.align)];
+  // GS v 0 advances to the next line after printing, so consecutive bands
+  // would be separated by a line-spacing gap and the image would come out
+  // striped. Zero spacing makes the bands butt together.
+  buffers.push(Commands.LINE_SPACING.SET(0));
+  for (const band of toBands(raster)) {
+    buffers.push(Commands.IMAGE.RASTER(band.width, band.height, band.data));
+  }
+  buffers.push(Commands.LINE_SPACING.DEFAULT, Commands.ALIGN.LEFT);
+  return buffers;
+}
+
+/**
+ * Compile-time guard: adding a PrintContent variant without a case for it
+ * becomes a type error here rather than a receipt that silently omits it.
+ */
+function assertNever(value: never): never {
+  throw new Error(`Unhandled print content: ${JSON.stringify(value)}`);
 }
 
 function alignmentCommand(align: TextAlign | undefined): Buffer {
@@ -245,6 +337,30 @@ export function validateBarcodeValue(type: BarcodeType, value: string): void {
   }
 }
 
+/**
+ * Byte-mode capacity of a version-40 QR symbol, by error-correction level.
+ *
+ * Commands.QRCODE.STORE only rejects payloads above its 65532-byte length
+ * field, which is far beyond what any symbol can hold. The real limit depends
+ * on the error-correction level, and only the builder knows which level was
+ * requested.
+ */
+const QR_CAPACITY: Record<QRErrorCorrection, number> = { L: 2953, M: 2331, Q: 1663, H: 1273 };
+
+/** Throws when a value cannot fit a QR symbol at the given correction level. */
+export function validateQRCodeValue(value: string, errorCorrection: QRErrorCorrection): void {
+  if (value.length === 0) {
+    throw new Error('QR code value is empty');
+  }
+  const bytes = Buffer.byteLength(value, 'utf8');
+  const capacity = QR_CAPACITY[errorCorrection];
+  if (bytes > capacity) {
+    throw new Error(
+      `QR code value is ${bytes} bytes; error correction level ${errorCorrection} holds at most ${capacity}`
+    );
+  }
+}
+
 /** Builds the payload bytes for a barcode, including any code-set prefix. */
 function barcodePayload(type: BarcodeType, value: string): Buffer {
   if (type === 'CODE128') {
@@ -272,11 +388,13 @@ function buildBarcode(value: string, options: BarcodeOptions): Buffer[] {
 }
 
 function buildQRCode(value: string, options?: QRCodeOptions): Buffer[] {
+  const errorCorrection = options?.errorCorrection ?? DEFAULTS.QR_ERROR_CORRECTION;
+  validateQRCodeValue(value, errorCorrection);
   return [
     alignmentCommand(options?.align),
     Commands.QRCODE.MODEL(2),
     Commands.QRCODE.SIZE(options?.size ?? DEFAULTS.QR_SIZE),
-    Commands.QRCODE.ERROR_CORRECTION[options?.errorCorrection ?? DEFAULTS.QR_ERROR_CORRECTION],
+    Commands.QRCODE.ERROR_CORRECTION[errorCorrection],
     // QR symbols carry their own encoding; the printer's character table does
     // not apply to them, so the data goes out as UTF-8.
     Commands.QRCODE.STORE(Buffer.from(value, 'utf8')),

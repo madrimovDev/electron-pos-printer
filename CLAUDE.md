@@ -28,6 +28,11 @@ npm run typecheck  # TypeScript type checking
     supported codepage; **do not edit by hand**, regenerate with
     `node scripts/generate-codepages.mjs` (source: the Unicode Consortium's
     vendor mapping files)
+- `src/images/` - PNG decoding and rasterisation for thermal printing
+  - `png.ts` - `decodePNG()`, using Node's own `zlib` for inflate; no runtime
+    dependency
+  - `raster.ts` - `rasterize()` and `toBands()`, turning decoded pixels into
+    the 1-bit raster an ESC/POS printer expects
 - `src/printer/` - Printer detection and raw printing (cross-platform)
 - `src/utils/` - Formatting utilities, HTML builder, hex-dump debug helper, and ReceiptBuilder class
 - `src/electron/` - Electron IPC integration (main, preload, renderer)
@@ -43,6 +48,25 @@ npm run typecheck  # TypeScript type checking
 - Receipt templates via `fromData()`
 
 **ESC/POS Builder** (`src/commands/escpos-builder.ts`): Converts PrintContent to raw ESC/POS bytes
+
+**PNG decoding** (`src/images/png.ts`): `decodePNG()` parses colour types 0, 2,
+3, 4 and 6, bit depths 1, 2, 4 and 8, all five scanline filters, `PLTE` and
+`tRNS`. 16-bit and interlaced PNGs are rejected. Input is capped at
+4096x4096 because decoding is synchronous on Electron's main process.
+
+**Rasterisation** (`src/images/raster.ts`): `rasterize()` turns a
+`DecodedImage` into a 1-bit `RasterImage` through a fixed pipeline:
+
+```
+alpha over white -> luminance -> resize -> dither -> pack
+```
+
+Resize must precede dither: dithering first and resizing after averages away
+the dot pattern that carries the tone, leaving mud with no visible error until
+someone prints a photo — the same shape of mistake as computing column widths
+before transliteration in the text pipeline below. `toBands()` then splits the
+raster into `BAND_HEIGHT`-row (128) chunks, because cheap printers drop a tall
+single raster silently.
 
 **dumpESCPOS** (`src/utils/hex-dump.ts`): Renders a raw ESC/POS byte stream as annotated, human-readable text (commands, control codes, decoded text) for debugging without a physical printer
 

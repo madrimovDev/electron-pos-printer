@@ -6,11 +6,13 @@ import type {
   FeedContent,
   BarcodeContent,
   QRCodeContent,
+  ImageContent,
   PaperWidth,
   TextStyle,
 } from '../types';
 import { DEFAULTS } from '../types';
 import { createLine, getCharsPerLine } from './format';
+import { PNG_DATA_URL } from '../commands/escpos-builder';
 
 /**
  * CSS styles for thermal printer output
@@ -175,7 +177,27 @@ function renderQRCode(content: QRCodeContent): string {
 }
 
 /**
- * Render single content item
+ * Render image content as a data URL `<img>`.
+ *
+ * `content.source` is bare base64 or already a `data:image/png;base64,...`
+ * URL (see `ImageContent.source`); either way an `<img src>` needs the data
+ * URL form, so a bare base64 source is prefixed rather than used verbatim.
+ */
+function renderImage(content: ImageContent): string {
+  const src = PNG_DATA_URL.test(content.source)
+    ? content.source
+    : `data:image/png;base64,${content.source}`;
+  return `<div class="image" style="text-align:${content.options?.align || 'center'}"><img src="${escapeHtml(src)}" style="max-width:100%"/></div>`;
+}
+
+/**
+ * Render single content item.
+ *
+ * `cashdraw` and `beep` have no visual counterpart in an html preview — there
+ * is no drawer or beeper attached to a print preview window — so they
+ * intentionally render as nothing. `assertNever` in the default case turns a
+ * future content type added without a case here into a compile error rather
+ * than a receipt that silently drops it, matching `escpos-builder.ts`.
  */
 function renderContent(content: PrintContent, charsPerLine: number): string {
   switch (content.type) {
@@ -192,14 +214,26 @@ function renderContent(content: PrintContent, charsPerLine: number): string {
     case 'qrcode':
       return renderQRCode(content);
     case 'image':
-      // Image rendering would require base64 handling
-      return `<div class="image" style="text-align:${content.options?.align || 'center'}"><img src="${content.source}" style="max-width:100%"/></div>`;
+      return renderImage(content);
     case 'cut':
       // Cut command is handled by printer, add visual separator in preview
       return '<div style="border-top:1px dashed #ccc;margin:10px 0"></div>';
-    default:
+    case 'cashdraw':
+    case 'beep':
+      // No hardware to trigger in a print preview; dropping these is correct.
       return '';
+    default:
+      return assertNever(content);
   }
+}
+
+/**
+ * Compile-time guard: adding a PrintContent variant without a case for it in
+ * `renderContent` becomes a type error here rather than a preview that
+ * silently omits it.
+ */
+function assertNever(value: never): never {
+  throw new Error(`Unhandled print content: ${JSON.stringify(value)}`);
 }
 
 /**

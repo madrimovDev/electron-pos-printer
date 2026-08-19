@@ -239,6 +239,70 @@ raw ESC/POS byte stream as annotated, human-readable text — commands, control
 codes and the decoded text bytes — so you can see exactly what would be sent
 to the printer without holding a physical one.
 
+## Images and logos
+
+Pass a PNG as base64, or as a `data:image/png;base64,...` URL:
+
+```ts
+import { readFileSync } from 'node:fs';
+
+receipt.image(readFileSync('logo.png').toString('base64'), { align: 'center' });
+```
+
+File paths are not accepted. Print content can arrive from a renderer over
+IPC, and reading an arbitrary path on its behalf would give it a capability it
+should not have — so the caller reads its own file.
+
+### Supported PNGs
+
+| Colour type | Bit depths |
+|---|---|
+| Greyscale | 1, 2, 4, 8 |
+| RGB | 8 |
+| Palette (with `PLTE`, optional `tRNS`) | 1, 2, 4, 8 |
+| Greyscale + alpha | 8 |
+| RGBA | 8 |
+
+All five scanline filters are handled. 16-bit and interlaced PNGs are rejected
+with a message saying what to re-save. Input is capped at 4096×4096, because
+decoding is synchronous and runs on the main process.
+
+Transparency is composited over white, so a logo with a cut-out background
+prints as the logo rather than as a filled black rectangle.
+
+### Sizing
+
+Images are scaled down to fit the printable width — 384 dots on 58mm paper,
+576 on 80mm — and are never scaled up, since stretching a small logo only
+makes it blocky. `ImageOptions.width` sets an explicit width, clamped to the
+same limit.
+
+### Dithering
+
+`dither: 'threshold'` (the default) applies a single cutoff, which keeps an
+already-black-and-white logo crisp. `dither: 'floyd-steinberg'` spreads the
+error into a dot pattern, which preserves the tone of a photograph or a
+gradient — at the cost of a pattern that thermal dot bloom can smear.
+
+```ts
+receipt.image(logo, { dither: 'floyd-steinberg' });
+```
+
+## Cash drawer and beeper
+
+```ts
+receipt.cut().openCashDrawer().beep();
+```
+
+Both are content items, so their position in the sequence is yours to choose:
+a drawer that opens before the cut and one that opens after are different
+behaviours.
+
+`openCashDrawer(5)` uses pin 5 instead of the default pin 2.
+
+Many printers ignore the beeper command entirely. Nothing in this package can
+detect that, so a silent beeper is a hardware answer rather than a fault here.
+
 ## Print modes
 
 | | `raw` (default) | `html` |
@@ -247,7 +311,8 @@ to the printer without holding a physical one.
 | Precise printer control | yes | no |
 | Needs a BrowserWindow | no | yes |
 | Barcodes and QR codes | printed by the printer | placeholders only |
-| Images | skipped until raster support lands | rendered |
+| Images | printed as a raster | rendered as `<img>` (base64 wrapped in a `data:` URL) |
+| Cash drawer / beeper | pulses / beeps | no effect — no drawer or beeper in a print preview |
 
 `printerName` and `paperWidth` apply to both modes. `codepage`,
 `codepageTable` and `charsPerLine` apply to `raw` only and are ignored in
@@ -294,7 +359,7 @@ The characters-per-line value derived from paper width can be overridden with
 | IPC printed HTML | IPC prints raw; pass `mode: 'html'` for the old path |
 | `cut(true)` cut fully | `cut(true)` cuts partially, as documented |
 | Barcode values were sent unchecked | Invalid values now throw before anything is sent — see `validateBarcodeValue` |
-| `[IMAGE]` placeholder text printed on receipts | Image content prints nothing until raster image support lands |
+| `[IMAGE]` placeholder text printed on receipts | Image content prints as a real raster — see [Images and logos](#images-and-logos) |
 | `printReceipt()` / `printText()` printed via HTML | They now print raw with `PC437` unless a `codepage` is passed |
 
 See [CHANGELOG.md](./CHANGELOG.md) for the full list.
