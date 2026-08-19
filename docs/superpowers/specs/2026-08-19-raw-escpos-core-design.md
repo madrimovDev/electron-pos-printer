@@ -73,8 +73,9 @@ Codepage'da mavjud boʻlmagan belgilar ASCII muqobiliga aylantiriladi:
 | `…` | U+2026 | `...` |
 | ajratilmaydigan boʻsh joy | U+00A0, U+2009, U+202F | ` ` — **shartsiz**, pastdagi izohga qarang |
 | `ғ қ ҳ` | U+0493, U+049B, U+04B3 | `г к х` |
+| `« »` | U+00AB, U+00BB | `"` — **faqat PC866 da**, qolgan codepage'larda oʻzgarmaydi |
 
-Translit **maqsadli codepage'ni bilgan holda** ishlaydi va layout'dan **oldin** bajariladi. Har bir belgi uchun avval codepage jadvalida borligi tekshiriladi: mavjud boʻlsa (masalan `«` `»` PC866 da bor) belgi oʻzgartirilmaydi, aks holda translit jadvalidan muqobil olinadi.
+Translit **maqsadli codepage'ni bilgan holda** ishlaydi va layout'dan **oldin** bajariladi. Har bir belgi uchun avval codepage jadvalida borligi tekshiriladi: mavjud boʻlsa (masalan `«` `»` PC437, PC852, CP1251 va WPC1252 da bor) belgi oʻzgartirilmaydi, aks holda translit jadvalidan muqobil olinadi.
 
 Yaʻni funksiya imzosi `translit(text, codepage): string` boʻladi va u encode qadamidagi jadval qidiruvini takrorlaydi, lekin baytga aylantirmaydi. Takrorlanish ataylab: encode faqat layout tugagach ishlashi mumkin, translit esa layout'dan oldin satr uzunligini barqarorlashtirishi kerak. Qidiruv mantiqʻi bitta ichki funksiyada saqlanadi va ikki joydan chaqiriladi.
 
