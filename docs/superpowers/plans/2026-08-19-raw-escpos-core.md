@@ -1490,6 +1490,36 @@ describe('dumpESCPOS', () => {
     expect(dump).toContain('unknown');
   });
 
+  it('names the print-mode flags rather than a magnification', () => {
+    expect(dumpESCPOS(Commands.TEXT.DOUBLE_HEIGHT)).toContain('double-height');
+    expect(dumpESCPOS(Commands.TEXT.DOUBLE_HEIGHT)).not.toContain('width');
+    expect(dumpESCPOS(Commands.TEXT.DOUBLE_WIDTH)).toContain('double-width');
+    const both = dumpESCPOS(Commands.TEXT.DOUBLE_SIZE);
+    expect(both).toContain('double-height');
+    expect(both).toContain('double-width');
+    expect(dumpESCPOS(Commands.TEXT.NORMAL)).toContain('normal');
+  });
+
+  it('terminates on a command truncated at the end of the buffer', () => {
+    expect(() => dumpESCPOS(Buffer.from([0x1b]))).not.toThrow();
+    // GS k header declaring a 40-byte payload that is not there
+    const truncated = Buffer.from([0x1d, 0x6b, 0x49, 40]);
+    expect(dumpESCPOS(truncated).split('\n').length).toBeLessThanOrEqual(2);
+  });
+
+  it('advances past a QR command declaring a zero-length payload', () => {
+    const zeroLength = Buffer.from([0x1d, 0x28, 0x6b, 0x00, 0x00, 0x31, 0x50, 0x41, 0x42]);
+    const lines = dumpESCPOS(zeroLength).split('\n');
+    expect(lines.length).toBeLessThanOrEqual(3);
+    expect(lines.length).toBeGreaterThan(0);
+  });
+
+  it('degrades on an unmapped GS second byte and resumes after it', () => {
+    const dump = dumpESCPOS(Buffer.from([0x1d, 0x7a, 0x41, 0x42]));
+    expect(dump).toContain('unknown');
+    expect(dump).toContain('"AB"');
+  });
+
   it('keeps offsets monotonic across a mixed stream', () => {
     const data = Buffer.concat([
       Commands.INIT,
@@ -1558,10 +1588,22 @@ function codepageFor(escT: number): Codepage | undefined {
   return (Object.keys(CODEPAGE_ESC_T) as Codepage[]).find((name) => CODEPAGE_ESC_T[name] === escT);
 }
 
-function sizeNote(n: number): string {
-  const width = ((n >> 4) & 0x07) + 1;
-  const height = (n & 0x07) + 1;
-  return `${width}x width, ${height}x height`;
+/**
+ * Decodes an `ESC !` operand.
+ *
+ * `ESC !` is "select print mode(s)" — a bitmask — not `GS !` "select character
+ * size", which is a pair of magnification nibbles. Decoding it as the latter
+ * reports a made-up multiplier and gets the axis backwards: `ESC ! 0x10` is
+ * double-*height*, but nibble arithmetic reads it as "2x width".
+ */
+function printModeNote(n: number): string {
+  const flags: string[] = [];
+  if (n & 0x01) flags.push('font B');
+  if (n & 0x08) flags.push('emphasized');
+  if (n & 0x10) flags.push('double-height');
+  if (n & 0x20) flags.push('double-width');
+  if (n & 0x80) flags.push('underline');
+  return `Print mode: ${flags.length > 0 ? flags.join(', ') : 'normal'}`;
 }
 
 /** Decodes the command starting at `offset`, or null if it is not recognised. */
@@ -1604,7 +1646,7 @@ function decodeCommand(data: Buffer, offset: number): Decoded | null {
             note: at(2) === 0 ? 'Underline off' : `Underline on (${at(2)}-dot)`,
           };
         case 0x21:
-          return { length: 3, mnemonic: `ESC ! ${at(2)}`, note: `Character size: ${sizeNote(at(2))}` };
+          return { length: 3, mnemonic: `ESC ! ${at(2)}`, note: printModeNote(at(2)) };
         case 0x64:
           return { length: 3, mnemonic: `ESC d ${at(2)}`, note: `Feed ${at(2)} line(s)` };
         case 0x70:
