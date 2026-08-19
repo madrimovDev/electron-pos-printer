@@ -1,3 +1,15 @@
+import type { Codepage } from '../commands/codepage-tables';
+
+export type { Codepage };
+
+/**
+ * Which print path to use.
+ *
+ * - `raw`: build ESC/POS bytes and send them straight to the printer. Default.
+ * - `html`: render HTML in a hidden window and use Electron's print API.
+ */
+export type PrintMode = 'raw' | 'html';
+
 /**
  * Printer paper width in millimeters
  */
@@ -58,24 +70,43 @@ export interface PrinterInfo {
  * Printer configuration options
  */
 export interface PrinterConfig {
-  /** Printer name (as returned by system) */
+  /** Printer name (as returned by the system). Used in both modes. */
   printerName: string;
-  /** Paper width in mm (58 or 80) */
+  /** Paper width in mm (58 or 80). Used in both modes. */
   paperWidth: PaperWidth;
-  /** Characters per line (auto-calculated if not specified) */
+  /**
+   * Characters per line. Defaults from paperWidth. raw mode only — the html
+   * renderer derives its column width from paperWidth alone and has no way
+   * to honor this override, so it is ignored in html mode.
+   */
   charsPerLine?: number;
-  /** Enable silent printing (no dialog) */
+
+  /** Which print path to use. Defaults to `'raw'`. */
+  mode?: PrintMode;
+  /**
+   * Character table for raw mode. A name selects both the `ESC t` code and the
+   * encoding table; a number is sent as `ESC t <n>` verbatim, for printers whose
+   * vendor uses a non-standard value. Defaults to `'PC437'`. Ignored in html mode.
+   */
+  codepage?: Codepage | number;
+  /**
+   * Encoding table to use when `codepage` is a number. Ignored otherwise and in
+   * html mode. Defaults to `'PC437'`.
+   */
+  codepageTable?: Codepage;
+
+  /** html mode only — ignored in raw mode. Enable silent printing (no dialog). */
   silent?: boolean;
-  /** Print in preview mode */
+  /** html mode only — ignored in raw mode. Show the render window. */
   preview?: boolean;
-  /** Page margins */
+  /** html mode only — ignored in raw mode. Page margins. */
   margin?: {
     top?: number;
     bottom?: number;
     left?: number;
     right?: number;
   };
-  /** Custom page size */
+  /** html mode only — ignored in raw mode. Custom page size. */
   pageSize?: {
     width: number;
     height?: number;
@@ -123,7 +154,7 @@ export interface ImageOptions {
 export interface BarcodeOptions {
   /** Barcode type */
   type: BarcodeType;
-  /** Barcode width (1-6) */
+  /** Barcode width (2-6) */
   width?: number;
   /** Barcode height in dots */
   height?: number;
@@ -269,6 +300,12 @@ export interface PrintResult {
   success: boolean;
   jobId: string;
   error?: string;
+  /**
+   * Which path produced this result. Set by the IPC handler and by `print()` /
+   * `printRaw()`; absent when `printRawData()` or `printHTML()` is called
+   * directly, since those do not know the mode.
+   */
+  mode?: PrintMode;
 }
 
 /**
@@ -347,6 +384,9 @@ export const DEFAULTS = {
   PAPER_WIDTH: 80 as PaperWidth,
   CHARS_PER_LINE_58: 32,
   CHARS_PER_LINE_80: 48,
+  MODE: 'raw' as PrintMode,
+  CODEPAGE: 'PC437' as Codepage,
+  CODEPAGE_TABLE: 'PC437' as Codepage,
   MARGIN: { top: 0, bottom: 0, left: 0, right: 0 },
   SILENT: true,
   BARCODE_WIDTH: 2,

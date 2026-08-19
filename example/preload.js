@@ -1,15 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const { exposePosPrinterAPI } = require('@madrimov/electron-pos-printer');
 
-// IPC Channel names
-const IPC_CHANNELS = {
-  GET_PRINTERS: 'pos-printer:get-printers',
-  PRINT: 'pos-printer:print',
-};
+exposePosPrinterAPI();
 
-// Expose POS Printer API to renderer
-contextBridge.exposeInMainWorld('posPrinter', {
-  getPrinters: () => ipcRenderer.invoke(IPC_CHANNELS.GET_PRINTERS),
-  print: (contents, config) => ipcRenderer.invoke(IPC_CHANNELS.PRINT, contents, config),
+// Example-only extra: dump to a file instead of printing.
+contextBridge.exposeInMainWorld('examplePrinter', {
+  dump: (contents, config) => ipcRenderer.invoke('example:dump', contents, config),
 });
-
-console.log('POS Printer API exposed to renderer');

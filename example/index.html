@@ -100,6 +100,14 @@
         <option value="58">58mm</option>
       </select>
     </label>
+    <label for="codepage">Codepage</label>
+    <select id="codepage">
+      <option value="PC437">PC437 — Western (default)</option>
+      <option value="PC866" selected>PC866 — Cyrillic</option>
+      <option value="CP1251">CP1251 — Windows Cyrillic</option>
+      <option value="PC852">PC852 — Latin 2</option>
+      <option value="WPC1252">WPC1252 — Windows Western</option>
+    </select>
   </div>
 
   <div class="section">
@@ -107,6 +115,9 @@
     <button id="printTest">Print Test Receipt</button>
     <button id="printSimple">Print Simple Text</button>
     <button id="printQR">Print with QR Code</button>
+    <button id="sample">Print sample (Cyrillic + Uzbek)</button>
+    <button id="dump">Dump to file</button>
+    <pre id="dumpResult"></pre>
   </div>
 
   <div class="section">
@@ -122,6 +133,15 @@
       logEl.scrollTop = logEl.scrollHeight;
       console.log(msg);
     };
+
+    // Builds the print config shared by every print/dump call from the current form state.
+    function config() {
+      return {
+        printerName: document.getElementById('printerSelect').value,
+        paperWidth: Number(document.getElementById('paperWidth').value) || 80,
+        codepage: document.getElementById('codepage').value,
+      };
+    }
 
     // Check if API is available
     if (window.posPrinter) {
@@ -209,8 +229,7 @@
         ];
 
         const result = await window.posPrinter.print(contents, {
-          printerName,
-          paperWidth,
+          ...config(),
           silent: true
         });
 
@@ -243,8 +262,7 @@
           { type: 'feed', lines: 3 },
           { type: 'cut' }
         ], {
-          printerName,
-          paperWidth,
+          ...config(),
           silent: true
         });
 
@@ -276,12 +294,60 @@
           { type: 'feed', lines: 3 },
           { type: 'cut' }
         ], {
-          printerName,
-          paperWidth,
+          ...config(),
           silent: true
         });
 
         log(result.success ? '✅ Print successful!' : `❌ Failed: ${result.error}`);
+      } catch (err) {
+        log(`❌ Error: ${err.message}`);
+      }
+    });
+
+    // Sample receipt exercising Cyrillic text, Uzbek Latin with the modifier
+    // letter apostrophe, an em dash, percentage-width table columns, a QR
+    // code, and a partial cut.
+    function sampleContents() {
+      return [
+        { type: 'text', value: 'Магазин «Дўкон»', style: { align: 'center', bold: true, size: 'double' } },
+        { type: 'text', value: 'Toshkent shahri, Chilonzor', style: { align: 'center' } },
+        { type: 'line', character: '-' },
+        { type: 'table', rows: [
+          [{ text: 'Товар', width: '50%', bold: true }, { text: 'Кол', width: '15%', align: 'center', bold: true }, { text: 'Сумма', width: '35%', align: 'right', bold: true }],
+          [{ text: 'Кофе', width: '50%' }, { text: '2', width: '15%', align: 'center' }, { text: '30 000', width: '35%', align: 'right' }],
+          [{ text: 'Choy — koʻk', width: '50%' }, { text: '1', width: '15%', align: 'center' }, { text: '12 000', width: '35%', align: 'right' }],
+        ] },
+        { type: 'line', character: '=' },
+        { type: 'table', rows: [[{ text: 'ИТОГО', bold: true }, { text: '42 000', align: 'right', bold: true }]] },
+        { type: 'text', value: 'Toʻlov: naqd · Rahmat!', style: { align: 'center' } },
+        { type: 'qrcode', value: 'https://madrimov.uz', options: { size: 6, align: 'center' } },
+        { type: 'feed', lines: 2 },
+        { type: 'cut', partial: true },
+      ];
+    }
+
+    document.getElementById('sample').addEventListener('click', async () => {
+      const cfg = config();
+
+      if (!cfg.printerName) {
+        log('⚠️ Please select a printer first');
+        return;
+      }
+
+      log('Printing sample receipt (Cyrillic + Uzbek)...');
+      try {
+        const result = await window.posPrinter.print(sampleContents(), cfg);
+        log(result.success ? '✅ Print successful!' : `❌ Failed: ${result.error}`);
+      } catch (err) {
+        log(`❌ Error: ${err.message}`);
+      }
+    });
+
+    document.getElementById('dump').addEventListener('click', async () => {
+      try {
+        const { path, bytes } = await window.examplePrinter.dump(sampleContents(), config());
+        document.getElementById('dumpResult').textContent = `Wrote ${bytes} bytes of ESC/POS. Dump: ${path}`;
+        log(`✅ Dump written: ${path} (${bytes} bytes)`);
       } catch (err) {
         log(`❌ Error: ${err.message}`);
       }

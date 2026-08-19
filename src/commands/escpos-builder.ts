@@ -1,354 +1,287 @@
 /**
- * ESC/POS command builder
- * Converts PrintContent array to raw ESC/POS bytes
+ * Builds raw ESC/POS bytes from a PrintContent array.
+ *
+ * Command constants come from `./esc-pos` — this module keeps no table of its
+ * own, because two tables inevitably drift apart. Text goes through
+ * `./codepage`, and layout arithmetic runs on *normalized* text so that column
+ * widths stay correct (see the pipeline note in `./codepage`).
  */
 import type {
   PrintContent,
   TextStyle,
   TableColumn,
+  TextAlign,
   PaperWidth,
+  BarcodeType,
   BarcodeOptions,
   QRCodeOptions,
 } from '../types';
 import { DEFAULTS } from '../types';
+import { calculateColumnWidths } from '../utils/format';
+import { Commands } from './esc-pos';
+import { encodeText, normalizeForCodepage, selectCodepage, resolveCodepage } from './codepage';
+import type { Codepage } from './codepage';
 
-// ESC/POS Control Codes
-const ESC = 0x1b;
-const GS = 0x1d;
-const LF = 0x0a;
+export interface BuildESCPOSOptions {
+  /** Paper width in mm. Determines charsPerLine unless that is given. */
+  paperWidth?: PaperWidth;
+  /** Character table, by name or as a raw `ESC t` value. Defaults to `'PC437'`. */
+  codepage?: Codepage | number;
+  /** Encoding table to use when `codepage` is a number. Defaults to `'PC437'`. */
+  codepageTable?: Codepage;
+  /**
+   * Characters per line, overriding the value derived from paperWidth. Needed
+   * for printers that are neither 32 nor 48 columns — 42 is common.
+   */
+  charsPerLine?: number;
+}
 
-// Pre-built commands
-const CMD = {
-  // Initialization
-  INIT: Buffer.from([ESC, 0x40]),
+/** Settings resolved once per build and threaded through the content builders. */
+interface BuildContext {
+  charsPerLine: number;
+  table: Codepage;
+}
 
-  // Line feed
-  LF: Buffer.from([LF]),
-
-  // Text alignment
-  ALIGN_LEFT: Buffer.from([ESC, 0x61, 0x00]),
-  ALIGN_CENTER: Buffer.from([ESC, 0x61, 0x01]),
-  ALIGN_RIGHT: Buffer.from([ESC, 0x61, 0x02]),
-
-  // Text style
-  BOLD_ON: Buffer.from([ESC, 0x45, 0x01]),
-  BOLD_OFF: Buffer.from([ESC, 0x45, 0x00]),
-  UNDERLINE_ON: Buffer.from([ESC, 0x2d, 0x01]),
-  UNDERLINE_OFF: Buffer.from([ESC, 0x2d, 0x00]),
-  INVERT_ON: Buffer.from([GS, 0x42, 0x01]),
-  INVERT_OFF: Buffer.from([GS, 0x42, 0x00]),
-
-  // Text size
-  SIZE_NORMAL: Buffer.from([ESC, 0x21, 0x00]),
-  SIZE_DOUBLE_HEIGHT: Buffer.from([ESC, 0x21, 0x10]),
-  SIZE_DOUBLE_WIDTH: Buffer.from([ESC, 0x21, 0x20]),
-  SIZE_DOUBLE: Buffer.from([ESC, 0x21, 0x30]),
-
-  // Paper control
-  CUT_PARTIAL: Buffer.from([GS, 0x56, 0x41, 0x00]),
-  CUT_FULL: Buffer.from([GS, 0x56, 0x00]),
-
-  // Feed n lines
-  feed: (n: number): Buffer => Buffer.from([ESC, 0x64, Math.min(255, Math.max(0, n))]),
-};
-
-/**
- * Build ESC/POS data from PrintContent array
- */
+/** Builds the complete ESC/POS byte stream for a receipt. */
 export function buildESCPOSData(
   contents: PrintContent[],
-  paperWidth: PaperWidth = DEFAULTS.PAPER_WIDTH
+  options: BuildESCPOSOptions = {}
 ): Buffer {
-  const charsPerLine = paperWidth === 58 ? DEFAULTS.CHARS_PER_LINE_58 : DEFAULTS.CHARS_PER_LINE_80;
-  const buffers: Buffer[] = [CMD.INIT];
+  const paperWidth = options.paperWidth ?? DEFAULTS.PAPER_WIDTH;
+  const charsPerLine =
+    options.charsPerLine ??
+    (paperWidth === 58 ? DEFAULTS.CHARS_PER_LINE_58 : DEFAULTS.CHARS_PER_LINE_80);
+  const { escT, table } = resolveCodepage(options.codepage, options.codepageTable);
+  const context: BuildContext = { charsPerLine, table };
 
+  const buffers: Buffer[] = [Commands.INIT, selectCodepage(escT)];
   for (const content of contents) {
-    const contentBuffers = buildContentESCPOS(content, charsPerLine);
-    buffers.push(...contentBuffers);
+    buffers.push(...buildContent(content, context));
   }
-
   return Buffer.concat(buffers);
 }
 
-/**
- * Build ESC/POS for a single content item
- */
-function buildContentESCPOS(content: PrintContent, charsPerLine: number): Buffer[] {
+function buildContent(content: PrintContent, context: BuildContext): Buffer[] {
   switch (content.type) {
     case 'text':
-      return buildTextESCPOS(content.value, content.style);
-
+      return buildText(content.value, content.style, context);
     case 'line':
-      return buildLineESCPOS(content.character, charsPerLine);
-
+      return buildLine(content.character, context);
     case 'table':
-      return buildTableESCPOS(content.rows, charsPerLine);
-
+      return buildTable(content.rows, context);
     case 'feed':
-      return [CMD.feed(content.lines ?? DEFAULTS.FEED_LINES)];
-
+      return [Commands.PAPER.FEED_N(content.lines ?? DEFAULTS.FEED_LINES)];
     case 'cut':
-      return [CMD.feed(3), content.partial ? CMD.CUT_PARTIAL : CMD.CUT_FULL];
-
+      return [
+        Commands.PAPER.FEED_N(3),
+        content.partial ? Commands.PAPER.CUT_PARTIAL : Commands.PAPER.CUT_FULL,
+      ];
     case 'barcode':
-      return buildBarcodeESCPOS(content.value, content.options);
-
+      return buildBarcode(content.value, content.options);
     case 'qrcode':
-      return buildQRCodeESCPOS(content.value, content.options);
-
+      return buildQRCode(content.value, content.options);
     case 'image':
-      // Image printing requires bitmap conversion - not implemented yet
-      return [Buffer.from('[IMAGE]\n', 'utf8')];
-
+      // Raster image support arrives in milestone 2. Emitting a '[IMAGE]'
+      // placeholder would print that literal text on a customer's receipt, and
+      // throwing would break every receipt built from data with a logo, so the
+      // content is skipped.
+      return [];
     default:
       return [];
   }
 }
 
-/**
- * Build ESC/POS for text content
- */
-function buildTextESCPOS(text: string, style?: TextStyle): Buffer[] {
-  const buffers: Buffer[] = [];
+function alignmentCommand(align: TextAlign | undefined): Buffer {
+  if (align === 'center') return Commands.ALIGN.CENTER;
+  if (align === 'right') return Commands.ALIGN.RIGHT;
+  return Commands.ALIGN.LEFT;
+}
 
-  // Set alignment
-  if (style?.align === 'center') {
-    buffers.push(CMD.ALIGN_CENTER);
-  } else if (style?.align === 'right') {
-    buffers.push(CMD.ALIGN_RIGHT);
-  } else {
-    buffers.push(CMD.ALIGN_LEFT);
+function sizeCommand(size: TextStyle['size']): Buffer | undefined {
+  switch (size) {
+    case 'double':
+      return Commands.TEXT.DOUBLE_SIZE;
+    case 'double-height':
+      return Commands.TEXT.DOUBLE_HEIGHT;
+    case 'double-width':
+      return Commands.TEXT.DOUBLE_WIDTH;
+    default:
+      return undefined;
   }
+}
 
-  // Set size
-  if (style?.size === 'double') {
-    buffers.push(CMD.SIZE_DOUBLE);
-  } else if (style?.size === 'double-height') {
-    buffers.push(CMD.SIZE_DOUBLE_HEIGHT);
-  } else if (style?.size === 'double-width') {
-    buffers.push(CMD.SIZE_DOUBLE_WIDTH);
+function hriCommand(position: BarcodeOptions['textPosition']): Buffer {
+  switch (position) {
+    case 'none':
+      return Commands.BARCODE.HRI_NONE;
+    case 'above':
+      return Commands.BARCODE.HRI_ABOVE;
+    case 'both':
+      return Commands.BARCODE.HRI_BOTH;
+    default:
+      return Commands.BARCODE.HRI_BELOW;
   }
+}
 
-  // Set bold
-  if (style?.bold) {
-    buffers.push(CMD.BOLD_ON);
-  }
+function buildText(text: string, style: TextStyle | undefined, context: BuildContext): Buffer[] {
+  const buffers: Buffer[] = [alignmentCommand(style?.align)];
 
-  // Set underline
-  if (style?.underline) {
-    buffers.push(CMD.UNDERLINE_ON);
-  }
+  const size = sizeCommand(style?.size);
+  if (size) buffers.push(size);
+  if (style?.bold) buffers.push(Commands.TEXT.BOLD_ON);
+  if (style?.underline) buffers.push(Commands.TEXT.UNDERLINE_ON);
+  if (style?.invert) buffers.push(Commands.TEXT.INVERT_ON);
 
-  // Set invert
-  if (style?.invert) {
-    buffers.push(CMD.INVERT_ON);
-  }
+  buffers.push(encodeText(text, context.table), Commands.PAPER.FEED_1);
 
-  // Add text
-  buffers.push(Buffer.from(text, 'utf8'));
-  buffers.push(CMD.LF);
-
-  // Reset styles
-  if (style?.bold) buffers.push(CMD.BOLD_OFF);
-  if (style?.underline) buffers.push(CMD.UNDERLINE_OFF);
-  if (style?.invert) buffers.push(CMD.INVERT_OFF);
-  if (style?.size) buffers.push(CMD.SIZE_NORMAL);
-  buffers.push(CMD.ALIGN_LEFT);
+  if (style?.invert) buffers.push(Commands.TEXT.INVERT_OFF);
+  if (style?.underline) buffers.push(Commands.TEXT.UNDERLINE_OFF);
+  if (style?.bold) buffers.push(Commands.TEXT.BOLD_OFF);
+  if (size) buffers.push(Commands.TEXT.NORMAL);
+  buffers.push(Commands.ALIGN.LEFT);
 
   return buffers;
 }
 
-/**
- * Build ESC/POS for line separator
- */
-function buildLineESCPOS(character: string | undefined, charsPerLine: number): Buffer[] {
-  const char = character || DEFAULTS.LINE_CHARACTER;
-  return [Buffer.from(char.repeat(charsPerLine), 'utf8'), CMD.LF];
+function buildLine(character: string | undefined, context: BuildContext): Buffer[] {
+  const normalized = normalizeForCodepage(character || DEFAULTS.LINE_CHARACTER, context.table);
+  const separator = normalized.charAt(0) || DEFAULTS.LINE_CHARACTER;
+  return [
+    encodeText(separator.repeat(context.charsPerLine), context.table),
+    Commands.PAPER.FEED_1,
+  ];
 }
 
-/**
- * Build ESC/POS for table content
- */
-function buildTableESCPOS(rows: TableColumn[][], charsPerLine: number): Buffer[] {
+/** Pads or truncates text to a fixed column width. */
+function padColumn(text: string, width: number, align: TextAlign | undefined): string {
+  if (text.length >= width) return text.substring(0, width);
+  const padding = width - text.length;
+  if (align === 'right') return ' '.repeat(padding) + text;
+  if (align === 'center') {
+    const left = Math.floor(padding / 2);
+    return ' '.repeat(left) + text + ' '.repeat(padding - left);
+  }
+  return text + ' '.repeat(padding);
+}
+
+function buildTable(rows: TableColumn[][], context: BuildContext): Buffer[] {
   const buffers: Buffer[] = [];
 
   for (const row of rows) {
-    const colWidths = calculateColumnWidths(row, charsPerLine);
+    const widths = calculateColumnWidths(row, context.charsPerLine);
     let line = '';
-
-    row.forEach((col, i) => {
-      const width = colWidths[i];
-      let text = col.text || '';
-
-      // Truncate or pad text
-      if (text.length > width) {
-        text = text.substring(0, width);
-      } else {
-        const padding = width - text.length;
-        if (col.align === 'right') {
-          text = ' '.repeat(padding) + text;
-        } else if (col.align === 'center') {
-          const left = Math.floor(padding / 2);
-          text = ' '.repeat(left) + text + ' '.repeat(padding - left);
-        } else {
-          text = text + ' '.repeat(padding);
-        }
-      }
-      line += text;
+    row.forEach((column, index) => {
+      // Normalize before measuring. An ellipsis becomes three characters and an
+      // unencodable character becomes one question mark, so padding computed on
+      // raw input would shift every column after it.
+      const text = normalizeForCodepage(column.text ?? '', context.table);
+      line += padColumn(text, widths[index], column.align);
     });
 
-    // Check if row has bold columns
-    const hasBold = row.some((col) => col.bold);
-    if (hasBold) buffers.push(CMD.BOLD_ON);
-
-    buffers.push(Buffer.from(line, 'utf8'));
-    buffers.push(CMD.LF);
-
-    if (hasBold) buffers.push(CMD.BOLD_OFF);
+    const hasBold = row.some((column) => column.bold);
+    if (hasBold) buffers.push(Commands.TEXT.BOLD_ON);
+    buffers.push(encodeText(line, context.table), Commands.PAPER.FEED_1);
+    if (hasBold) buffers.push(Commands.TEXT.BOLD_OFF);
   }
 
   return buffers;
 }
 
-/**
- * Calculate column widths for table
- */
-function calculateColumnWidths(columns: TableColumn[], totalWidth: number): number[] {
-  const widths: (number | null)[] = [];
-  let usedWidth = 0;
-  let flexCount = 0;
+const DIGITS_ONLY = /^\d+$/;
 
-  // First pass: calculate fixed widths
-  for (const col of columns) {
-    if (col.width !== undefined) {
-      if (typeof col.width === 'string' && col.width.endsWith('%')) {
-        const percent = parseInt(col.width, 10) / 100;
-        const w = Math.floor(totalWidth * percent);
-        widths.push(w);
-        usedWidth += w;
-      } else {
-        const w = typeof col.width === 'number' ? col.width : parseInt(col.width, 10);
-        widths.push(w);
-        usedWidth += w;
-      }
-    } else {
-      widths.push(null);
-      flexCount++;
-    }
+/** Returns why a value is invalid for a symbology, or null when it is fine. */
+function barcodeError(type: BarcodeType, value: string): string | null {
+  if (value.length === 0) return 'the value is empty';
+
+  switch (type) {
+    case 'EAN13':
+      return DIGITS_ONLY.test(value) && (value.length === 12 || value.length === 13)
+        ? null
+        : 'EAN13 requires 12 or 13 digits';
+    case 'EAN8':
+      return DIGITS_ONLY.test(value) && (value.length === 7 || value.length === 8)
+        ? null
+        : 'EAN8 requires 7 or 8 digits';
+    case 'UPC-A':
+      return DIGITS_ONLY.test(value) && (value.length === 11 || value.length === 12)
+        ? null
+        : 'UPC-A requires 11 or 12 digits';
+    case 'UPC-E':
+      return DIGITS_ONLY.test(value) && value.length >= 6 && value.length <= 8
+        ? null
+        : 'UPC-E requires 6 to 8 digits';
+    case 'ITF':
+      if (!DIGITS_ONLY.test(value)) return 'ITF requires digits only';
+      return value.length % 2 === 0 ? null : 'ITF requires an even number of digits';
+    case 'CODE39':
+      // '*' is CODE39's start/stop delimiter, not a data character. A value
+      // may omit it (the printer adds it automatically) or wrap itself in a
+      // matched pair, but '*' may not appear anywhere else.
+      return /^(\*[0-9A-Z \-.$/+%]+\*|[0-9A-Z \-.$/+%]+)$/.test(value)
+        ? null
+        : 'CODE39 allows only 0-9, A-Z, space and - . $ / + %, optionally wrapped in a matched pair of *';
+    case 'CODABAR':
+      return /^[A-Da-d][0-9\-$:/.+]*[A-Da-d]$/.test(value)
+        ? null
+        : 'CODABAR must start and end with A-D and otherwise contain only 0-9 - $ : / . +';
+    case 'CODE93':
+    case 'CODE128':
+      return /^[\x20-\x7e]+$/.test(value) ? null : `${type} requires printable ASCII`;
+    default:
+      return null;
   }
-
-  // Second pass: distribute remaining width to flex columns
-  if (flexCount > 0) {
-    const remaining = totalWidth - usedWidth;
-    const flexWidth = Math.floor(remaining / flexCount);
-    for (let i = 0; i < widths.length; i++) {
-      if (widths[i] === null) {
-        widths[i] = flexWidth;
-      }
-    }
-  }
-
-  return widths as number[];
 }
 
 /**
- * Build ESC/POS for barcode
+ * Throws when a value cannot be encoded in the given symbology.
+ *
+ * Some printers hang on malformed barcode data — they stop responding and do
+ * not even cut the paper — so this runs before any byte is sent.
  */
-function buildBarcodeESCPOS(value: string, options: BarcodeOptions): Buffer[] {
-  const buffers: Buffer[] = [];
-  const height = options.height ?? DEFAULTS.BARCODE_HEIGHT;
-  const width = options.width ?? DEFAULTS.BARCODE_WIDTH;
-
-  // Alignment
-  if (options.align === 'center') {
-    buffers.push(CMD.ALIGN_CENTER);
-  } else if (options.align === 'right') {
-    buffers.push(CMD.ALIGN_RIGHT);
+export function validateBarcodeValue(type: BarcodeType, value: string): void {
+  const reason = barcodeError(type, value);
+  if (reason !== null) {
+    throw new Error(`Invalid ${type} barcode value ${JSON.stringify(value)}: ${reason}`);
   }
-
-  // Set barcode height
-  buffers.push(Buffer.from([GS, 0x68, Math.min(255, height)]));
-
-  // Set barcode width (2-6)
-  buffers.push(Buffer.from([GS, 0x77, Math.min(6, Math.max(2, width))]));
-
-  // Set HRI position
-  const hriPosition = options.textPosition ?? 'below';
-  const hriCode =
-    hriPosition === 'none' ? 0x00 : hriPosition === 'above' ? 0x01 : hriPosition === 'both' ? 0x03 : 0x02;
-  buffers.push(Buffer.from([GS, 0x48, hriCode]));
-
-  // Barcode type codes
-  const barcodeTypes: Record<string, number> = {
-    'UPC-A': 0x41,
-    'UPC-E': 0x42,
-    EAN13: 0x43,
-    EAN8: 0x44,
-    CODE39: 0x45,
-    ITF: 0x46,
-    CODABAR: 0x47,
-    CODE93: 0x48,
-    CODE128: 0x49,
-  };
-
-  const typeCode = barcodeTypes[options.type] ?? 0x49; // Default CODE128
-
-  // Print barcode (CODE128 format with Code B)
-  if (options.type === 'CODE128') {
-    buffers.push(Buffer.from([GS, 0x6b, typeCode, value.length + 2, 0x7b, 0x42]));
-    buffers.push(Buffer.from(value, 'ascii'));
-  } else {
-    buffers.push(Buffer.from([GS, 0x6b, typeCode, value.length]));
-    buffers.push(Buffer.from(value, 'ascii'));
-  }
-
-  buffers.push(CMD.LF);
-  buffers.push(CMD.ALIGN_LEFT);
-
-  return buffers;
 }
 
-/**
- * Build ESC/POS for QR code
- */
-function buildQRCodeESCPOS(value: string, options?: QRCodeOptions): Buffer[] {
-  const buffers: Buffer[] = [];
-  const size = options?.size ?? DEFAULTS.QR_SIZE;
-  const errorLevel = options?.errorCorrection ?? DEFAULTS.QR_ERROR_CORRECTION;
-
-  // Alignment
-  if (options?.align === 'center') {
-    buffers.push(CMD.ALIGN_CENTER);
-  } else if (options?.align === 'right') {
-    buffers.push(CMD.ALIGN_RIGHT);
+/** Builds the payload bytes for a barcode, including any code-set prefix. */
+function barcodePayload(type: BarcodeType, value: string): Buffer {
+  if (type === 'CODE128') {
+    // '{' introduces a code-set switch in ESC/POS CODE128 data, so a literal
+    // brace has to be doubled to survive.
+    const escaped = value.replace(/\{/g, '{{');
+    // '{B' selects code set B, which covers printable ASCII.
+    return Buffer.concat([Buffer.from([0x7b, 0x42]), Buffer.from(escaped, 'ascii')]);
   }
-
-  // QR Code: Select model (Model 2)
-  buffers.push(Buffer.from([GS, 0x28, 0x6b, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00]));
-
-  // QR Code: Set size (1-16)
-  buffers.push(Buffer.from([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x43, Math.min(16, Math.max(1, size))]));
-
-  // QR Code: Set error correction level
-  const errorCodes: Record<string, number> = { L: 0x30, M: 0x31, Q: 0x32, H: 0x33 };
-  const errorCode = errorCodes[errorLevel] ?? 0x31;
-  buffers.push(Buffer.from([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x45, errorCode]));
-
-  // QR Code: Store data
-  const dataBytes = Buffer.from(value, 'utf8');
-  const storeLen = dataBytes.length + 3;
-  const pL = storeLen & 0xff;
-  const pH = (storeLen >> 8) & 0xff;
-  buffers.push(Buffer.from([GS, 0x28, 0x6b, pL, pH, 0x31, 0x50, 0x30]));
-  buffers.push(dataBytes);
-
-  // QR Code: Print
-  buffers.push(Buffer.from([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x51, 0x30]));
-
-  buffers.push(CMD.LF);
-  buffers.push(CMD.ALIGN_LEFT);
-
-  return buffers;
+  return Buffer.from(value, 'ascii');
 }
 
-export { CMD as ESCPOSCommands };
+function buildBarcode(value: string, options: BarcodeOptions): Buffer[] {
+  validateBarcodeValue(options.type, value);
+  const typeCode = Commands.BARCODE.TYPE[options.type] ?? Commands.BARCODE.TYPE.CODE128;
+  return [
+    alignmentCommand(options.align),
+    Commands.BARCODE.HEIGHT(options.height ?? DEFAULTS.BARCODE_HEIGHT),
+    Commands.BARCODE.WIDTH(options.width ?? DEFAULTS.BARCODE_WIDTH),
+    hriCommand(options.textPosition),
+    Commands.BARCODE.PRINT(typeCode, barcodePayload(options.type, value)),
+    Commands.PAPER.FEED_1,
+    Commands.ALIGN.LEFT,
+  ];
+}
+
+function buildQRCode(value: string, options?: QRCodeOptions): Buffer[] {
+  return [
+    alignmentCommand(options?.align),
+    Commands.QRCODE.MODEL(2),
+    Commands.QRCODE.SIZE(options?.size ?? DEFAULTS.QR_SIZE),
+    Commands.QRCODE.ERROR_CORRECTION[options?.errorCorrection ?? DEFAULTS.QR_ERROR_CORRECTION],
+    // QR symbols carry their own encoding; the printer's character table does
+    // not apply to them, so the data goes out as UTF-8.
+    Commands.QRCODE.STORE(Buffer.from(value, 'utf8')),
+    Commands.QRCODE.PRINT,
+    Commands.PAPER.FEED_1,
+    Commands.ALIGN.LEFT,
+  ];
+}
