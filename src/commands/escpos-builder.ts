@@ -16,11 +16,14 @@ import type {
   BarcodeOptions,
   QRCodeOptions,
 } from '../types';
-import { DEFAULTS } from '../types';
+import { DEFAULTS, PRINTABLE_WIDTH_58, PRINTABLE_WIDTH_80 } from '../types';
+import type { ImageOptions } from '../types';
 import { calculateColumnWidths } from '../utils/format';
 import { Commands } from './esc-pos';
 import { encodeText, normalizeForCodepage, selectCodepage, resolveCodepage } from './codepage';
 import type { Codepage } from './codepage';
+import { decodePNG } from '../images/png';
+import { rasterize, toBands } from '../images/raster';
 
 export interface BuildESCPOSOptions {
   /** Paper width in mm. Determines charsPerLine unless that is given. */
@@ -40,6 +43,8 @@ export interface BuildESCPOSOptions {
 interface BuildContext {
   charsPerLine: number;
   table: Codepage;
+  /** Printable width in dots, for image content. */
+  printableWidth: number;
 }
 
 /** Builds the complete ESC/POS byte stream for a receipt. */
@@ -52,7 +57,8 @@ export function buildESCPOSData(
     options.charsPerLine ??
     (paperWidth === 58 ? DEFAULTS.CHARS_PER_LINE_58 : DEFAULTS.CHARS_PER_LINE_80);
   const { escT, table } = resolveCodepage(options.codepage, options.codepageTable);
-  const context: BuildContext = { charsPerLine, table };
+  const printableWidth = paperWidth === 58 ? PRINTABLE_WIDTH_58 : PRINTABLE_WIDTH_80;
+  const context: BuildContext = { charsPerLine, table, printableWidth };
 
   const buffers: Buffer[] = [Commands.INIT, selectCodepage(escT)];
   for (const content of contents) {
@@ -81,14 +87,69 @@ function buildContent(content: PrintContent, context: BuildContext): Buffer[] {
     case 'qrcode':
       return buildQRCode(content.value, content.options);
     case 'image':
-      // Raster image support arrives in milestone 2. Emitting a '[IMAGE]'
-      // placeholder would print that literal text on a customer's receipt, and
-      // throwing would break every receipt built from data with a logo, so the
-      // content is skipped.
-      return [];
+      return buildImage(content.source, content.options, context);
+    case 'cashdraw':
+      return [
+        content.pin === 5 ? Commands.CASH_DRAWER.OPEN_PIN5 : Commands.CASH_DRAWER.OPEN_PIN2,
+      ];
+    case 'beep':
+      return [Commands.BEEP(content.times ?? 1, content.duration ?? 3)];
     default:
-      return [];
+      return assertNever(content);
   }
+}
+
+/**
+ * Paths a caller is likely to pass by mistake, now that only base64 is accepted.
+ *
+ * Safe against false positives despite `/` being a base64 character: every PNG
+ * begins with the same 8-byte signature, so its base64 always starts `iVBOR`.
+ */
+const LOOKS_LIKE_PATH = /^(\.{0,2}\/|[A-Za-z]:[\\/]|\\\\)/;
+const PNG_DATA_URL = /^data:image\/png;base64,/i;
+
+/** Turns an image source into PNG bytes. Base64 or a data URL only. */
+function decodeImageSource(source: string): Buffer {
+  if (LOOKS_LIKE_PATH.test(source)) {
+    throw new Error(
+      'Image source must be base64 or a data:image/png;base64 URL — file paths are not accepted. ' +
+        'Read the file yourself: readFileSync(path).toString("base64")'
+    );
+  }
+  const base64 = PNG_DATA_URL.test(source) ? source.slice(source.indexOf(',') + 1) : source;
+  return Buffer.from(base64, 'base64');
+}
+
+function buildImage(
+  source: string,
+  options: ImageOptions | undefined,
+  context: BuildContext
+): Buffer[] {
+  const raster = rasterize(decodePNG(decodeImageSource(source)), {
+    maxWidth: context.printableWidth,
+    width: options?.width,
+    dither: options?.dither,
+    threshold: options?.threshold,
+  });
+
+  const buffers: Buffer[] = [alignmentCommand(options?.align)];
+  // GS v 0 advances to the next line after printing, so consecutive bands
+  // would be separated by a line-spacing gap and the image would come out
+  // striped. Zero spacing makes the bands butt together.
+  buffers.push(Commands.LINE_SPACING.SET(0));
+  for (const band of toBands(raster)) {
+    buffers.push(Commands.IMAGE.RASTER(band.width, band.height, band.data));
+  }
+  buffers.push(Commands.LINE_SPACING.DEFAULT, Commands.ALIGN.LEFT);
+  return buffers;
+}
+
+/**
+ * Compile-time guard: adding a PrintContent variant without a case for it
+ * becomes a type error here rather than a receipt that silently omits it.
+ */
+function assertNever(value: never): never {
+  throw new Error(`Unhandled print content: ${JSON.stringify(value)}`);
 }
 
 function alignmentCommand(align: TextAlign | undefined): Buffer {
