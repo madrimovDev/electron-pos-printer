@@ -1,0 +1,17 @@
+0000  1B 40                        ESC @             Initialize printer
+0002  1B 74 11                     ESC t 17          Select character table (PC866)
+0005  1B 61 01                     ESC a 1           Align center
+0008  1B 33 00                     ESC 3 0           Line spacing 0 dots
+000b  1D 76 30 00 02 00 04 00 ...  GS v 0            Raster image 16x4 (16 bytes)
+001b  1B 32                        ESC 2             Default line spacing
+001d  1B 61 00                     ESC a 0           Align left
+0020  1B 61 01                     ESC a 1           Align center
+0023  1B 45 01                     ESC E 1           Bold on
+0026  8C A0 A3 A0 A7 A8 AD         "Магазин"         (PC866, 7 bytes)
+002d  0A                           LF                Line feed
+002e  1B 45 00                     ESC E 0           Bold off
+0031  1B 61 00                     ESC a 0           Align left
+0034  1B 70 00 19 FA               ESC p 0           Pulse cash drawer pin 2
+0039  1B 42 01 03                  ESC B 1 3         Beep 1 time(s)
+003d  1B 64 03                     ESC d 3           Feed 3 line(s)
+0040  1D 56 01                     GS V 1            Partial cut
