@@ -81,9 +81,11 @@ function buildContent(content: PrintContent, context: BuildContext): Buffer[] {
     case 'qrcode':
       return buildQRCode(content.value, content.options);
     case 'image':
-      // Real image support arrives in milestone 2. Until then this prints a
-      // placeholder; the next task replaces that with silently skipping it.
-      return [encodeText('[IMAGE]', context.table), Commands.PAPER.FEED_1];
+      // Raster image support arrives in milestone 2. Emitting a '[IMAGE]'
+      // placeholder would print that literal text on a customer's receipt, and
+      // throwing would break every receipt built from data with a logo, so the
+      // content is skipped.
+      return [];
     default:
       return [];
   }
@@ -185,16 +187,75 @@ function buildTable(rows: TableColumn[][], context: BuildContext): Buffer[] {
   return buffers;
 }
 
+const DIGITS_ONLY = /^\d+$/;
+
+/** Returns why a value is invalid for a symbology, or null when it is fine. */
+function barcodeError(type: BarcodeType, value: string): string | null {
+  if (value.length === 0) return 'the value is empty';
+
+  switch (type) {
+    case 'EAN13':
+      return DIGITS_ONLY.test(value) && (value.length === 12 || value.length === 13)
+        ? null
+        : 'EAN13 requires 12 or 13 digits';
+    case 'EAN8':
+      return DIGITS_ONLY.test(value) && (value.length === 7 || value.length === 8)
+        ? null
+        : 'EAN8 requires 7 or 8 digits';
+    case 'UPC-A':
+      return DIGITS_ONLY.test(value) && (value.length === 11 || value.length === 12)
+        ? null
+        : 'UPC-A requires 11 or 12 digits';
+    case 'UPC-E':
+      return DIGITS_ONLY.test(value) && value.length >= 6 && value.length <= 8
+        ? null
+        : 'UPC-E requires 6 to 8 digits';
+    case 'ITF':
+      if (!DIGITS_ONLY.test(value)) return 'ITF requires digits only';
+      return value.length % 2 === 0 ? null : 'ITF requires an even number of digits';
+    case 'CODE39':
+      return /^[0-9A-Z \-.$/+%*]+$/.test(value)
+        ? null
+        : 'CODE39 allows only 0-9, A-Z, space and - . $ / + % *';
+    case 'CODABAR':
+      return /^[A-Da-d][0-9\-$:/.+]*[A-Da-d]$/.test(value)
+        ? null
+        : 'CODABAR must start and end with A-D and otherwise contain only 0-9 - $ : / . +';
+    case 'CODE93':
+    case 'CODE128':
+      return /^[\x20-\x7e]+$/.test(value) ? null : `${type} requires printable ASCII`;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Throws when a value cannot be encoded in the given symbology.
+ *
+ * Some printers hang on malformed barcode data — they stop responding and do
+ * not even cut the paper — so this runs before any byte is sent.
+ */
+export function validateBarcodeValue(type: BarcodeType, value: string): void {
+  const reason = barcodeError(type, value);
+  if (reason !== null) {
+    throw new Error(`Invalid ${type} barcode value ${JSON.stringify(value)}: ${reason}`);
+  }
+}
+
 /** Builds the payload bytes for a barcode, including any code-set prefix. */
 function barcodePayload(type: BarcodeType, value: string): Buffer {
   if (type === 'CODE128') {
+    // '{' introduces a code-set switch in ESC/POS CODE128 data, so a literal
+    // brace has to be doubled to survive.
+    const escaped = value.replace(/\{/g, '{{');
     // '{B' selects code set B, which covers printable ASCII.
-    return Buffer.concat([Buffer.from([0x7b, 0x42]), Buffer.from(value, 'ascii')]);
+    return Buffer.concat([Buffer.from([0x7b, 0x42]), Buffer.from(escaped, 'ascii')]);
   }
   return Buffer.from(value, 'ascii');
 }
 
 function buildBarcode(value: string, options: BarcodeOptions): Buffer[] {
+  validateBarcodeValue(options.type, value);
   const typeCode = Commands.BARCODE.TYPE[options.type] ?? Commands.BARCODE.TYPE.CODE128;
   return [
     alignmentCommand(options.align),

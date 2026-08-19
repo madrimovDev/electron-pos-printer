@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildESCPOSData } from './escpos-builder';
-import type { PrintContent, PaperWidth } from '../types';
+import type { PrintContent, PaperWidth, BarcodeType } from '../types';
 
 /**
  * Wrapper around buildESCPOSData so the signature change in the next task
@@ -201,10 +201,25 @@ describe('barcode content', () => {
   });
 });
 
-describe('image content (interim behaviour)', () => {
-  it('currently prints a placeholder — replaced in a later task', () => {
-    const data = build([{ type: 'image', source: 'logo.png' }]);
-    expect(data.toString('ascii')).toContain('[IMAGE]');
+describe('image content', () => {
+  it('emits nothing until real image support lands in milestone 2', () => {
+    const withImage = buildESCPOSData([{ type: 'image', source: 'logo.png' }]);
+    const withoutImage = buildESCPOSData([]);
+    expect([...withImage]).toEqual([...withoutImage]);
+  });
+
+  it('never prints a placeholder on the receipt', () => {
+    const data = buildESCPOSData([{ type: 'image', source: 'logo.png' }]);
+    expect(data.toString('ascii')).not.toContain('IMAGE');
+  });
+
+  it('does not break a receipt built from data with a logo', () => {
+    expect(() =>
+      buildESCPOSData([
+        { type: 'image', source: 'logo.png' },
+        { type: 'text', value: 'Shop' },
+      ])
+    ).not.toThrow();
   });
 });
 
@@ -298,5 +313,71 @@ describe('partial cut', () => {
     const data = buildESCPOSData([{ type: 'cut', partial: true }]);
     expect(seqAt(data, 0x1d, 0x56, 0x01)).toBeGreaterThan(0);
     expect(seqAt(data, 0x1d, 0x56, 0x41, 0x00)).toBe(-1);
+  });
+});
+
+describe('barcode validation', () => {
+  const barcode = (type: BarcodeType, value: string): PrintContent[] => [
+    { type: 'barcode', value, options: { type } },
+  ];
+
+  it('accepts a 12-digit EAN13', () => {
+    expect(() => buildESCPOSData(barcode('EAN13', '123456789012'))).not.toThrow();
+  });
+
+  it('accepts a 13-digit EAN13', () => {
+    expect(() => buildESCPOSData(barcode('EAN13', '1234567890128'))).not.toThrow();
+  });
+
+  it('rejects an EAN13 of the wrong length', () => {
+    expect(() => buildESCPOSData(barcode('EAN13', '12345'))).toThrow(/EAN13/);
+  });
+
+  it('rejects a non-numeric EAN13', () => {
+    expect(() => buildESCPOSData(barcode('EAN13', '12345678901A'))).toThrow(/EAN13/);
+  });
+
+  it('rejects an EAN8 of the wrong length', () => {
+    expect(() => buildESCPOSData(barcode('EAN8', '12345'))).toThrow(/EAN8/);
+  });
+
+  it('rejects a UPC-A of the wrong length', () => {
+    expect(() => buildESCPOSData(barcode('UPC-A', '123'))).toThrow(/UPC-A/);
+  });
+
+  it('rejects an ITF with an odd digit count', () => {
+    expect(() => buildESCPOSData(barcode('ITF', '12345'))).toThrow(/even/);
+    expect(() => buildESCPOSData(barcode('ITF', '123456'))).not.toThrow();
+  });
+
+  it('rejects lowercase in CODE39', () => {
+    expect(() => buildESCPOSData(barcode('CODE39', 'abc'))).toThrow(/CODE39/);
+    expect(() => buildESCPOSData(barcode('CODE39', 'ABC-123'))).not.toThrow();
+  });
+
+  it('requires CODABAR to be delimited by A-D', () => {
+    expect(() => buildESCPOSData(barcode('CODABAR', '1234'))).toThrow(/CODABAR/);
+    expect(() => buildESCPOSData(barcode('CODABAR', 'A1234B'))).not.toThrow();
+  });
+
+  it('rejects non-ASCII in CODE128', () => {
+    expect(() => buildESCPOSData(barcode('CODE128', 'Привет'))).toThrow(/CODE128/);
+  });
+
+  it('rejects an empty value', () => {
+    expect(() => buildESCPOSData(barcode('CODE128', ''))).toThrow();
+  });
+
+  it('doubles a literal brace in a CODE128 payload', () => {
+    const data = buildESCPOSData(barcode('CODE128', 'a{b'));
+    // '{B' selector, then 'a', '{', '{', 'b'
+    expectOrder(data, [[0x7b, 0x42], [0x61, 0x7b, 0x7b, 0x62]]);
+  });
+
+  it('counts the escaped brace in the length byte', () => {
+    const data = buildESCPOSData(barcode('CODE128', 'a{b'));
+    const at = data.indexOf(Buffer.from([0x1d, 0x6b, 0x49]));
+    // payload is '{B' + 'a{{b' = 6 bytes
+    expect(data[at + 3]).toBe(6);
   });
 });
