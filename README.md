@@ -311,7 +311,8 @@ detect that, so a silent beeper is a hardware answer rather than a fault here.
 | Precise printer control | yes | no |
 | Needs a BrowserWindow | no | yes |
 | Barcodes and QR codes | printed by the printer | placeholders only |
-| Images | printed as a raster | rendered as `<img>` |
+| Images | printed as a raster | rendered as `<img>` (base64 wrapped in a `data:` URL) |
+| Cash drawer / beeper | pulses / beeps | no effect — no drawer or beeper in a print preview |
 
 `printerName` and `paperWidth` apply to both modes. `codepage`,
 `codepageTable` and `charsPerLine` apply to `raw` only and are ignored in

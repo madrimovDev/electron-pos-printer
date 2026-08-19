@@ -108,7 +108,8 @@ function buildContent(content: PrintContent, context: BuildContext): Buffer[] {
  * and never ends in an image extension like `.png`.
  */
 const LOOKS_LIKE_PATH = /^(\.{0,2}\/|[A-Za-z]:[\\/]|\\\\)|\.(png|jpe?g|gif|bmp|webp)$/i;
-const PNG_DATA_URL = /^data:image\/png;base64,/i;
+/** Matches a `data:image/png;base64,...` URL. Shared with the html builder. */
+export const PNG_DATA_URL = /^data:image\/png;base64,/i;
 
 /** Turns an image source into PNG bytes. Base64 or a data URL only. */
 function decodeImageSource(source: string): Buffer {
