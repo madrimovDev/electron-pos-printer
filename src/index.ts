@@ -9,7 +9,7 @@ export * from './types';
 
 // ESC/POS Commands
 export { Commands, toBuffer, concat, encodeText } from './commands';
-export { buildESCPOSData, ESCPOSCommands } from './commands/escpos-builder';
+export { buildESCPOSData } from './commands/escpos-builder';
 
 // Printer utilities
 export {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildESCPOSData, ESCPOSCommands } from './escpos-builder';
+import { buildESCPOSData } from './escpos-builder';
 import type { PrintContent, PaperWidth } from '../types';
 
 /**
@@ -7,7 +7,7 @@ import type { PrintContent, PaperWidth } from '../types';
  * touches one line instead of every call site.
  */
 const build = (contents: PrintContent[], paperWidth: PaperWidth = 80): Buffer =>
-  buildESCPOSData(contents, paperWidth);
+  buildESCPOSData(contents, { paperWidth });
 
 /** Offset of a byte sequence, or -1. */
 const seqAt = (data: Buffer, ...bytes: number[]): number => data.indexOf(Buffer.from(bytes));
@@ -208,8 +208,95 @@ describe('image content (interim behaviour)', () => {
   });
 });
 
-describe('ESCPOSCommands (removed in a later task)', () => {
-  it('exposes INIT as raw bytes', () => {
-    expect([...ESCPOSCommands.INIT]).toEqual([0x1b, 0x40]);
+describe('codepage selection', () => {
+  it('emits ESC t immediately after ESC @', () => {
+    const data = buildESCPOSData([], { codepage: 'PC866' });
+    expect([...data]).toEqual([0x1b, 0x40, 0x1b, 0x74, 0x11]);
+  });
+
+  it('defaults to PC437, which is ESC t 0', () => {
+    const data = buildESCPOSData([]);
+    expect([...data]).toEqual([0x1b, 0x40, 0x1b, 0x74, 0x00]);
+  });
+
+  it('sends a numeric codepage verbatim', () => {
+    const data = buildESCPOSData([], { codepage: 73, codepageTable: 'CP1251' });
+    expect([...data]).toEqual([0x1b, 0x40, 0x1b, 0x74, 0x49]);
+  });
+});
+
+describe('text encoding', () => {
+  it('encodes Cyrillic through the selected table', () => {
+    const data = buildESCPOSData([{ type: 'text', value: 'Привет' }], { codepage: 'PC866' });
+    expect(seqAt(data, 0x8f, 0xe0, 0xa8, 0xa2, 0xa5, 0xe2)).toBeGreaterThan(0);
+  });
+
+  it('encodes the same text differently under CP1251', () => {
+    const data = buildESCPOSData([{ type: 'text', value: 'Привет' }], {
+      codepage: 73,
+      codepageTable: 'CP1251',
+    });
+    expect(seqAt(data, 0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2)).toBeGreaterThan(0);
+  });
+
+  it('transliterates Uzbek Latin turned commas', () => {
+    const data = buildESCPOSData([{ type: 'text', value: 'Toʻxta' }], { codepage: 'PC437' });
+    expect(data.toString('ascii')).toContain("To'xta");
+  });
+
+  it('does not emit UTF-8 bytes for Cyrillic', () => {
+    const data = buildESCPOSData([{ type: 'text', value: 'П' }], { codepage: 'PC866' });
+    // UTF-8 for П is D0 9F; the printer must receive the single byte 8F
+    expect(seqAt(data, 0xd0, 0x9f)).toBe(-1);
+  });
+});
+
+describe('layout runs after transliteration', () => {
+  it('keeps column widths correct when an ellipsis expands to three dots', () => {
+    const data = buildESCPOSData(
+      [{ type: 'table', rows: [[{ text: 'a…', width: 6 }, { text: 'b', width: 6 }]] }],
+      { codepage: 'PC437' }
+    );
+    // 'a…' normalizes to 'a...' (4 chars) and is then padded to 6
+    expect(data.toString('ascii')).toContain('a...  b     ');
+  });
+
+  it('pads an unencodable character as a single question mark', () => {
+    const data = buildESCPOSData(
+      [{ type: 'table', rows: [[{ text: '日x', width: 4 }]] }],
+      { codepage: 'PC437' }
+    );
+    expect(data.toString('ascii')).toContain('?x  ');
+  });
+
+  it('fills a separator line with encodable bytes only', () => {
+    const data = buildESCPOSData([{ type: 'line', character: '—' }], { codepage: 'PC437' });
+    // em dash transliterates to '-'
+    expect([...data].filter((b) => b === 0x2d)).toHaveLength(48);
+  });
+});
+
+describe('charsPerLine override', () => {
+  it('uses an explicit charsPerLine instead of deriving it from paperWidth', () => {
+    const data = buildESCPOSData([{ type: 'line' }], { paperWidth: 80, charsPerLine: 42 });
+    expect([...data].filter((b) => b === 0x2d)).toHaveLength(42);
+  });
+});
+
+describe('qrcode model', () => {
+  it('selects QR model 2 before setting the size', () => {
+    const data = buildESCPOSData([{ type: 'qrcode', value: 'hi' }]);
+    expectOrder(data, [
+      [0x1d, 0x28, 0x6b, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00],
+      [0x1d, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x43],
+    ]);
+  });
+});
+
+describe('partial cut', () => {
+  it('uses GS V 1, not the feed-and-full-cut form', () => {
+    const data = buildESCPOSData([{ type: 'cut', partial: true }]);
+    expect(seqAt(data, 0x1d, 0x56, 0x01)).toBeGreaterThan(0);
+    expect(seqAt(data, 0x1d, 0x56, 0x41, 0x00)).toBe(-1);
   });
 });
