@@ -25,6 +25,10 @@ one place a reader can scan first — and this project adheres to
 - `print(window, contents, config)` accepts `null` for `window` in raw mode.
 - `cut(true)` now performs a real partial cut. It previously emitted
   `GS V 65 0`, which feeds and then cuts *fully*.
+- `printReceipt()` / `printText()` printed via HTML in 1.x and now print raw
+  with `PC437` unless a `codepage` is passed. Both methods gained an optional
+  trailing `config` parameter to supply `codepage` and other `PrinterConfig`
+  overrides.
 
 ### Added
 

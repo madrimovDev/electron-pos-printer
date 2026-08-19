@@ -247,6 +247,7 @@ to the printer without holding a physical one.
 | Precise printer control | yes | no |
 | Needs a BrowserWindow | no | yes |
 | Barcodes and QR codes | printed by the printer | placeholders only |
+| Images | skipped until raster support lands | rendered |
 
 `printerName` and `paperWidth` apply to both modes. `codepage`,
 `codepageTable` and `charsPerLine` apply to `raw` only and are ignored in
@@ -294,6 +295,7 @@ The characters-per-line value derived from paper width can be overridden with
 | `cut(true)` cut fully | `cut(true)` cuts partially, as documented |
 | Barcode values were sent unchecked | Invalid values now throw before anything is sent — see `validateBarcodeValue` |
 | `[IMAGE]` placeholder text printed on receipts | Image content prints nothing until raster image support lands |
+| `printReceipt()` / `printText()` printed via HTML | They now print raw with `PC437` unless a `codepage` is passed |
 
 See [CHANGELOG.md](./CHANGELOG.md) for the full list.
 
