@@ -212,11 +212,16 @@ function formatLine(offset: number, bytes: Buffer, mnemonic: string, note: strin
 /**
  * Renders an ESC/POS byte stream as annotated lines, one per command or text run.
  *
- * @param options.table Codepage used to decode high bytes in text runs. Only
- *   affects how the dump *reads* — it does not change the bytes.
+ * @param options.table Seed codepage used to decode high bytes in text runs,
+ *   before the stream's own `ESC t` commands are seen. Once a recognised
+ *   `ESC t` is decoded, the active table switches to the codepage it names,
+ *   for every text run after it — matching what the printer itself would do.
+ *   An unrecognised (vendor-specific) `ESC t` code leaves the active table
+ *   unchanged. This only affects how the dump *reads* — it does not change
+ *   the bytes.
  */
 export function dumpESCPOS(data: Buffer, options?: { table?: Codepage }): string {
-  const table = options?.table ?? 'PC437';
+  let table = options?.table ?? 'PC437';
   const lines: string[] = [];
   let offset = 0;
 
@@ -225,6 +230,12 @@ export function dumpESCPOS(data: Buffer, options?: { table?: Codepage }): string
     if (command) {
       const length = Math.min(command.length, data.length - offset);
       lines.push(formatLine(offset, data.subarray(offset, offset + length), command.mnemonic, command.note));
+      // Track the active table so later text runs decode with the codepage
+      // the stream itself selected, not just the caller-supplied seed.
+      if (data[offset] === 0x1b && data[offset + 1] === 0x74) {
+        const name = codepageFor(data[offset + 2]);
+        if (name) table = name;
+      }
       offset += length;
       continue;
     }

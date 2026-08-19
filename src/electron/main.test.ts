@@ -103,6 +103,11 @@ describe('print handler', () => {
     expect((result as { error: string }).error).toMatch(/window/i);
   });
 
+  it('resolves to a failed PrintResult instead of rejecting when config is missing', async () => {
+    const result = await handlerFor(IPC_CHANNELS.PRINT)(fakeEvent, CONTENTS, undefined);
+    expect(result).toMatchObject({ success: false, mode: 'raw' });
+  });
+
   it('turns a build error into a failed result rather than throwing', async () => {
     const result = await handlerFor(IPC_CHANNELS.PRINT)(fakeEvent, [
       { type: 'barcode', value: 'nope', options: { type: 'EAN13' } },

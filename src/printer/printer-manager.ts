@@ -1,5 +1,6 @@
 import type { BrowserWindow, WebContents, PrinterInfo as ElectronPrinterInfo } from 'electron';
 import type { PrinterInfo, PrinterConfig, PrintResult, PaperWidth } from '../types';
+import { DEFAULTS } from '../types';
 
 /**
  * Convert Electron PrinterInfo to our PrinterInfo type
@@ -80,7 +81,15 @@ export function getPageWidthPixels(paperWidth: PaperWidth): number {
 }
 
 /**
- * Create default printer configuration
+ * Create default printer configuration.
+ *
+ * The returned fields apply depending on `mode`:
+ * - `printerName`, `paperWidth`: used in both modes.
+ * - `mode`, `codepage`, `charsPerLine`: raw mode only.
+ * - `silent`, `preview`, `margin`, `pageSize`: html mode only.
+ *
+ * Fields for the mode you are not using are harmless to leave in the
+ * returned object — they are simply ignored (see `PrinterConfig`).
  */
 export function createDefaultConfig(
   printerName: string,
@@ -89,6 +98,8 @@ export function createDefaultConfig(
   return {
     printerName,
     paperWidth,
+    mode: DEFAULTS.MODE,
+    codepage: DEFAULTS.CODEPAGE,
     charsPerLine: getCharsPerLine(paperWidth),
     silent: true,
     preview: false,

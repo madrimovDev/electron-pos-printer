@@ -15,6 +15,7 @@
  */
 import { CODEPAGE_TABLES, CODEPAGE_ESC_T, UNDEFINED_CHAR } from './codepage-tables';
 import type { Codepage } from './codepage-tables';
+import { DEFAULTS } from '../types';
 
 export type { Codepage };
 export { CODEPAGE_TABLES, CODEPAGE_ESC_T };
@@ -186,8 +187,8 @@ export function selectCodepage(escT: number): Buffer {
  * `ESC t` value — and `codepageTable` says how to encode the bytes.
  */
 export function resolveCodepage(
-  codepage: Codepage | number = 'PC437',
-  codepageTable: Codepage = 'PC437'
+  codepage: Codepage | number = DEFAULTS.CODEPAGE,
+  codepageTable: Codepage = DEFAULTS.CODEPAGE_TABLE
 ): { escT: number; table: Codepage } {
   if (typeof codepage === 'number') {
     return { escT: codepage, table: codepageTable };

@@ -5,6 +5,7 @@ const {
   setupPrinterIPC,
   buildESCPOSData,
   dumpESCPOS,
+  resolveCodepage,
 } = require('@madrimov/electron-pos-printer');
 
 /** Extra channel used only by this example, to inspect output without a printer. */
@@ -38,7 +39,10 @@ function setupDumpIPC() {
       codepageTable: config.codepageTable,
     });
     const target = path.join(app.getPath('downloads'), 'receipt-dump.txt');
-    writeFileSync(target, dumpESCPOS(data, { table: config.codepageTable || config.codepage }), 'utf8');
+    // Use the library's own precedence rule instead of re-deriving it here,
+    // so the example cannot drift from resolveCodepage()'s behaviour.
+    const { table } = resolveCodepage(config.codepage, config.codepageTable);
+    writeFileSync(target, dumpESCPOS(data, { table }), 'utf8');
     return { path: target, bytes: data.length };
   });
 }

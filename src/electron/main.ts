@@ -74,7 +74,11 @@ export function setupPrinterIPC(): void {
       contents: PrintContent[],
       config: PrinterConfig
     ): Promise<PrintResult> => {
-      const mode = config.mode ?? DEFAULTS.MODE;
+      // `config?.` guards a renderer invoking the channel with a missing
+      // config: reading `.mode` off `undefined` here must not throw outside
+      // the try, or the failure would escape as an IPC rejection instead of
+      // a PrintResult.
+      const mode = config?.mode ?? DEFAULTS.MODE;
       try {
         // Raw printing talks to the spooler directly — it needs no window, so
         // the lookup only happens on the html branch.
@@ -107,7 +111,8 @@ export async function print(
   contents: PrintContent[],
   config: PrinterConfig
 ): Promise<PrintResult> {
-  const mode = config.mode ?? DEFAULTS.MODE;
+  // See the IPC handler above for why this guards against a missing config.
+  const mode = config?.mode ?? DEFAULTS.MODE;
   try {
     return mode === 'raw'
       ? await printViaRaw(contents, config)

@@ -58,6 +58,18 @@ describe('dumpESCPOS', () => {
     expect(dump).not.toContain('"Привет"');
   });
 
+  it('switches the active table when the stream selects one, with no table option passed', () => {
+    const data = Buffer.concat([selectCodepage(17), encodeText('Привет', 'PC866')]);
+    const dump = dumpESCPOS(data);
+    expect(dump).toContain('"Привет"');
+  });
+
+  it('leaves the active table unchanged after a vendor-specific ESC t code', () => {
+    const data = Buffer.concat([selectCodepage(200), encodeText('Привет', 'PC866')]);
+    const dump = dumpESCPOS(data, { table: 'PC866' });
+    expect(dump).toContain('"Привет"');
+  });
+
   it('advances past a barcode payload instead of decoding it as text', () => {
     const data = Commands.BARCODE.PRINT(0x49, Buffer.from('{BABC', 'ascii'));
     const dump = dumpESCPOS(data);

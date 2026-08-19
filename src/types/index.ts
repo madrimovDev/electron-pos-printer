@@ -154,7 +154,7 @@ export interface ImageOptions {
 export interface BarcodeOptions {
   /** Barcode type */
   type: BarcodeType;
-  /** Barcode width (1-6) */
+  /** Barcode width (2-6) */
   width?: number;
   /** Barcode height in dots */
   height?: number;
