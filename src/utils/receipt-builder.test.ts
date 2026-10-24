@@ -122,3 +122,33 @@ describe('ReceiptBuilder', () => {
     expect(contents.length).toBeGreaterThan(0);
   });
 });
+
+describe('cash drawer and beeper', () => {
+  it('appends a cash drawer pulse defaulting to pin 2', () => {
+    const contents = createReceipt(80).openCashDrawer().getContents();
+    expect(contents).toEqual([{ type: 'cashdraw', pin: 2 }]);
+  });
+
+  it('appends a cash drawer pulse on pin 5', () => {
+    expect(createReceipt(80).openCashDrawer(5).getContents()).toEqual([
+      { type: 'cashdraw', pin: 5 },
+    ]);
+  });
+
+  it('appends a beep with default times and duration', () => {
+    expect(createReceipt(80).beep().getContents()).toEqual([
+      { type: 'beep', times: 1, duration: 3 },
+    ]);
+  });
+
+  it('appends a beep with explicit times and duration', () => {
+    expect(createReceipt(80).beep(3, 5).getContents()).toEqual([
+      { type: 'beep', times: 3, duration: 5 },
+    ]);
+  });
+
+  it('keeps the sequence the caller wrote', () => {
+    const contents = createReceipt(80).cut(true).openCashDrawer().beep().getContents();
+    expect(contents.map((c) => c.type)).toEqual(['cut', 'cashdraw', 'beep']);
+  });
+});

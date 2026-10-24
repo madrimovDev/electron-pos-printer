@@ -1,0 +1,27 @@
+0000  1B 40                        ESC @             Initialize printer
+0002  1B 74 11                     ESC t 17          Select character table (PC866)
+0005  1B 61 01                     ESC a 1           Align center
+0008  1B 45 01                     ESC E 1           Bold on
+000b  8C A0 A3 A0 A7 A8 AD         "Магазин"         (PC866, 7 bytes)
+0012  0A                           LF                Line feed
+0013  1B 45 00                     ESC E 0           Bold off
+0016  1B 61 00                     ESC a 0           Align left
+0019  1B 61 00                     ESC a 0           Align left
+001c  54 6F 27 6C 6F 76 3A 20 ...  "To'lov: naqd"    (PC866, 12 bytes)
+0028  0A                           LF                Line feed
+0029  1B 61 00                     ESC a 0           Align left
+002c  2D 2D 2D 2D 2D 2D 2D 2D ...  "------------------------------------------------"  (PC866, 48 bytes)
+005c  0A                           LF                Line feed
+005d  88 E2 AE A3 AE 3A 20 20 ...  "Итого:                                    12 000"  (PC866, 48 bytes)
+008d  0A                           LF                Line feed
+008e  1B 61 01                     ESC a 1           Align center
+0091  1D 28 6B 04 00 31 41 32 ...  GS ( k 49 65      Select QR model (9 bytes)
+009a  1D 28 6B 03 00 31 43 06      GS ( k 49 67      Set QR module size 6 (8 bytes)
+00a2  1D 28 6B 03 00 31 45 31      GS ( k 49 69      Set QR error correction (8 bytes)
+00aa  1D 28 6B 16 00 31 50 30 ...  GS ( k 49 80      Store QR data (27 bytes)
+00c5  1D 28 6B 03 00 31 51 30      GS ( k 49 81      Print QR symbol (8 bytes)
+00cd  0A                           LF                Line feed
+00ce  1B 61 00                     ESC a 0           Align left
+00d1  1B 64 02                     ESC d 2           Feed 2 line(s)
+00d4  1B 64 03                     ESC d 3           Feed 3 line(s)
+00d7  1D 56 01                     GS V 1            Partial cut

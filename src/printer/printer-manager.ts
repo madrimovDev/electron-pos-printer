@@ -1,5 +1,6 @@
 import type { BrowserWindow, WebContents, PrinterInfo as ElectronPrinterInfo } from 'electron';
 import type { PrinterInfo, PrinterConfig, PrintResult, PaperWidth } from '../types';
+import { DEFAULTS } from '../types';
 
 /**
  * Convert Electron PrinterInfo to our PrinterInfo type
@@ -16,29 +17,14 @@ function convertPrinterInfo(printer: ElectronPrinterInfo): PrinterInfo {
 }
 
 /**
- * Get the list of available printers
- * Must be called from the main process
- */
-export function getPrinters(webContents: WebContents): PrinterInfo[] {
-  // For sync fallback - deprecated in newer Electron versions
-  const getPrintersSync = (webContents as unknown as { getPrinters?: () => ElectronPrinterInfo[] }).getPrinters;
-  if (typeof getPrintersSync === 'function') {
-    return getPrintersSync.call(webContents).map(convertPrinterInfo);
-  }
-  return [];
-}
-
-/**
- * Get printers asynchronously (Electron 20+)
+ * Returns the printers Electron can see.
+ *
+ * The synchronous `webContents.getPrinters()` counterpart was removed in
+ * Electron 21; this package requires >= 28, so there is nothing to fall back to.
  */
 export async function getPrintersAsync(webContents: WebContents): Promise<PrinterInfo[]> {
-  if (typeof webContents.getPrintersAsync === 'function') {
-    const printers = await webContents.getPrintersAsync();
-    return printers.map(convertPrinterInfo);
-  }
-
-  // Fallback for older versions
-  return getPrinters(webContents);
+  const printers = await webContents.getPrintersAsync();
+  return printers.map(convertPrinterInfo);
 }
 
 /**
@@ -95,7 +81,15 @@ export function getPageWidthPixels(paperWidth: PaperWidth): number {
 }
 
 /**
- * Create default printer configuration
+ * Create default printer configuration.
+ *
+ * The returned fields apply depending on `mode`:
+ * - `printerName`, `paperWidth`: used in both modes.
+ * - `mode`, `codepage`, `charsPerLine`: raw mode only.
+ * - `silent`, `preview`, `margin`, `pageSize`: html mode only.
+ *
+ * Fields for the mode you are not using are harmless to leave in the
+ * returned object — they are simply ignored (see `PrinterConfig`).
  */
 export function createDefaultConfig(
   printerName: string,
@@ -104,6 +98,8 @@ export function createDefaultConfig(
   return {
     printerName,
     paperWidth,
+    mode: DEFAULTS.MODE,
+    codepage: DEFAULTS.CODEPAGE,
     charsPerLine: getCharsPerLine(paperWidth),
     silent: true,
     preview: false,

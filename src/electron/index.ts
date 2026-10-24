@@ -3,6 +3,7 @@ export {
   setupPrinterIPC,
   removePrinterIPC,
   print,
+  printRaw,
   printRawHTML,
   getPrintersAsync,
   createDefaultConfig,

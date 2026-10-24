@@ -1,9 +1,13 @@
 {
   "name": "pos-printer-example",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "main": "main.js",
+  "private": true,
   "scripts": {
     "start": "electron ."
+  },
+  "dependencies": {
+    "@madrimov/electron-pos-printer": "file:.."
   },
   "devDependencies": {
     "electron": "^34.0.0"

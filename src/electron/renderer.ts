@@ -70,15 +70,25 @@ export class PosPrinter {
 
   /**
    * Print using ReceiptBuilder
+   *
+   * @param config Optional overrides merged on top of the defaults derived
+   *   from `receipt` (`paperWidth`, `charsPerLine`) and `silent: true`. Pass
+   *   `codepage` here to print non-ASCII text correctly — without it, raw
+   *   mode falls back to `PC437` and non-Latin text prints as `?`.
    */
-  async printReceipt(receipt: ReceiptBuilder, printerName: string): Promise<PrintResult> {
-    const config: PrinterConfig = {
+  async printReceipt(
+    receipt: ReceiptBuilder,
+    printerName: string,
+    config?: Partial<Omit<PrinterConfig, 'printerName' | 'paperWidth'>>
+  ): Promise<PrintResult> {
+    const mergedConfig: PrinterConfig = {
       printerName,
       paperWidth: receipt.getPaperWidth(),
       charsPerLine: receipt.getCharsPerLine(),
       silent: true,
+      ...config,
     };
-    return this.print(receipt.getContents(), config);
+    return this.print(receipt.getContents(), mergedConfig);
   }
 
   /**
@@ -90,14 +100,17 @@ export class PosPrinter {
 
   /**
    * Quick print text
+   *
+   * @param config Optional overrides, see {@link printReceipt}.
    */
   async printText(
     text: string,
     printerName: string,
-    paperWidth: PaperWidth = DEFAULTS.PAPER_WIDTH
+    paperWidth: PaperWidth = DEFAULTS.PAPER_WIDTH,
+    config?: Partial<Omit<PrinterConfig, 'printerName' | 'paperWidth'>>
   ): Promise<PrintResult> {
     const receipt = createReceipt(paperWidth).text(text).feed().cut();
-    return this.printReceipt(receipt, printerName);
+    return this.printReceipt(receipt, printerName, config);
   }
 }
 
